@@ -12,12 +12,7 @@ export interface ProductInput {
   cost_cents: number | null;
   status: ProductStatus;
   featured: boolean;
-  turquoise_type: string | null;
-  metal: string | null;
-  stone_origin: string | null;
-  bead_size: string | null;
   length: string | null;
-  weight_oz: number | null;
   meta_description: string | null;
 }
 
@@ -66,12 +61,7 @@ export async function validateProductInput(
       cost_cents: costCents,
       status: statusRaw as ProductStatus,
       featured: toBool(raw.featured),
-      turquoise_type: nullable(raw.turquoise_type),
-      metal: nullable(raw.metal),
-      stone_origin: nullable(raw.stone_origin),
-      bead_size: nullable(raw.bead_size),
       length: nullable(raw.length),
-      weight_oz: toNum(raw.weight_oz),
       meta_description: nullable(raw.meta_description),
     },
   };
@@ -90,12 +80,6 @@ function toInt(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : parseInt(String(v), 10);
   return Number.isFinite(n) ? Math.trunc(n) : null;
-}
-
-function toNum(v: unknown): number | null {
-  if (v === null || v === undefined || v === '') return null;
-  const n = typeof v === 'number' ? v : parseFloat(String(v));
-  return Number.isFinite(n) ? n : null;
 }
 
 function toBool(v: unknown): boolean {

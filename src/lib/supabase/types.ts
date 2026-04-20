@@ -19,12 +19,7 @@ export interface Product {
   cost_cents: number | null;
   status: ProductStatus;
   featured: boolean;
-  turquoise_type: string | null;
-  metal: string | null;
-  stone_origin: string | null;
-  bead_size: string | null;
   length: string | null;
-  weight_oz: number | null;
   meta_description: string | null;
   sold_at: string | null;
   reserved_until: string | null;

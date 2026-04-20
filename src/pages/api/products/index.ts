@@ -7,7 +7,7 @@ export const prerender = false;
 
 // Explicit column list — cost_cents must never leak out of the public API.
 const PUBLIC_COLUMNS =
-  'id, slug, piece_id, title, price_cents, turquoise_type, metal, bead_size, length, status, featured, published_at, created_at, product_images(storage_path, alt_text, display_order)';
+  'id, slug, piece_id, title, price_cents, length, status, featured, published_at, created_at, product_images(storage_path, alt_text, display_order)';
 
 export const GET: APIRoute = async ({ cookies, request }) => {
   const supabase = createSupabaseServerClient({ cookies, request });
@@ -32,9 +32,6 @@ export const GET: APIRoute = async ({ cookies, request }) => {
       piece_id: p.piece_id,
       title: p.title,
       price_cents: p.price_cents,
-      turquoise_type: p.turquoise_type,
-      metal: p.metal,
-      bead_size: p.bead_size,
       length: p.length,
       status: p.status,
       featured: p.featured,

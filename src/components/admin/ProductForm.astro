@@ -110,50 +110,8 @@ const costDollars =
         </div>
 
         <div>
-          <label for="bead_size">Bead size</label>
-          <input
-            id="bead_size"
-            name="bead_size"
-            placeholder='6mm round, graduated 4-8mm, etc.'
-            value={product?.bead_size ?? ''}
-          />
-        </div>
-
-        <div>
-          <label for="turquoise_type">Turquoise type</label>
-          <input
-            id="turquoise_type"
-            name="turquoise_type"
-            placeholder="Royston, Kingman, Spiderweb…"
-            value={product?.turquoise_type ?? ''}
-          />
-        </div>
-
-        <div>
-          <label for="metal">Metal</label>
-          <input id="metal" name="metal" placeholder="Sterling Silver, Copper…" value={product?.metal ?? ''} />
-        </div>
-
-        <div>
-          <label for="stone_origin">Stone origin</label>
-          <input id="stone_origin" name="stone_origin" value={product?.stone_origin ?? ''} />
-        </div>
-
-        <div>
           <label for="length">Length</label>
           <input id="length" name="length" placeholder={'18"'} value={product?.length ?? ''} />
-        </div>
-
-        <div>
-          <label for="weight_oz">Weight (oz)</label>
-          <input
-            id="weight_oz"
-            name="weight_oz"
-            type="number"
-            step="0.01"
-            min="0"
-            value={product?.weight_oz ?? ''}
-          />
         </div>
 
         <div class="full">
@@ -257,9 +215,6 @@ const costDollars =
     const fd = new FormData(form);
     const priceCents = toCents(fd.get('price_dollars'));
     const costCents = toCents(fd.get('cost_dollars'));
-    const weightRaw = fd.get('weight_oz');
-    const weightStr = typeof weightRaw === 'string' ? weightRaw.trim() : '';
-    const weight = weightStr === '' ? null : parseFloat(weightStr);
 
     return {
       title: String(fd.get('title') ?? '').trim(),
@@ -269,12 +224,7 @@ const costDollars =
       cost_cents: costCents,
       status: String(fd.get('status') ?? 'draft'),
       featured: fd.get('featured') === 'on',
-      bead_size: String(fd.get('bead_size') ?? ''),
-      turquoise_type: String(fd.get('turquoise_type') ?? ''),
-      metal: String(fd.get('metal') ?? ''),
-      stone_origin: String(fd.get('stone_origin') ?? ''),
       length: String(fd.get('length') ?? ''),
-      weight_oz: weight,
       meta_description: String(fd.get('meta_description') ?? ''),
     };
   }
