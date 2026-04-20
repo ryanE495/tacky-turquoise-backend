@@ -1,0 +1,147 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import ProductList from '~/components/admin/ProductList.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { publicImageUrl } from '~/lib/images';
+import type { ProductStatus } from '~/lib/supabase/types';
+
+export const prerender = false;
+
+type FilterValue = 'all' | ProductStatus | 'featured';
+
+const FILTER_TABS: Array<{ value: FilterValue; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'draft', label: 'Draft' },
+  { value: 'published', label: 'Published' },
+  { value: 'sold', label: 'Sold' },
+  { value: 'archived', label: 'Archived' },
+  { value: 'featured', label: 'Featured' },
+];
+
+const filterParam = (Astro.url.searchParams.get('status') ?? 'all') as FilterValue;
+const search = (Astro.url.searchParams.get('q') ?? '').trim();
+
+const supabase = createSupabaseAdminClient();
+let query = supabase
+  .from('products')
+  .select(
+    'id, slug, piece_id, title, price_cents, status, featured, created_at, product_images(storage_path, display_order)',
+  )
+  .order('created_at', { ascending: false });
+
+if (filterParam === 'featured') {
+  query = query.eq('featured', true);
+} else if (filterParam !== 'all') {
+  query = query.eq('status', filterParam);
+}
+if (search) {
+  query = query.ilike('title', `%${search}%`);
+}
+
+const { data: rows, error } = await query;
+
+const products = (rows ?? []).map((r) => {
+  const imgs = (r.product_images ?? []).slice().sort((a, b) => a.display_order - b.display_order);
+  return {
+    id: r.id,
+    slug: r.slug,
+    piece_id: r.piece_id,
+    title: r.title,
+    price_cents: r.price_cents,
+    status: r.status as ProductStatus,
+    featured: !!r.featured,
+    created_at: r.created_at,
+    primary_image_url: imgs[0] ? publicImageUrl(supabase, imgs[0].storage_path) : null,
+  };
+});
+---
+
+<AdminLayout title="Dashboard">
+  <div class="page-header">
+    <h1>Products</h1>
+    <a class="btn btn-primary" href="/admin/products/new">+ New Product</a>
+  </div>
+
+  {error && <div class="flash flash-error">{error.message}</div>}
+
+  <form method="get" class="filters">
+    <div class="tabs">
+      {
+        FILTER_TABS.map((t) => {
+          const params = new URLSearchParams();
+          if (t.value !== 'all') params.set('status', t.value);
+          if (search) params.set('q', search);
+          const href = `/admin${params.toString() ? `?${params.toString()}` : ''}`;
+          const active = filterParam === t.value;
+          return (
+            <a href={href} class:list={['tab', { active }]}>
+              {t.label}
+            </a>
+          );
+        })
+      }
+    </div>
+    <div class="search">
+      <input
+        type="search"
+        name="q"
+        placeholder="Search by title…"
+        value={search}
+        aria-label="Search"
+      />
+      {filterParam !== 'all' && <input type="hidden" name="status" value={filterParam} />}
+      <button type="submit">Search</button>
+    </div>
+  </form>
+
+  <ProductList products={products} />
+</AdminLayout>
+
+<style>
+  .filters {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+  }
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .tab {
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    font-size: 0.9rem;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .tab:hover {
+    background: #f0eee7;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .search {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .search input {
+    flex: 1;
+    min-width: 0;
+  }
+  @media (min-width: 640px) {
+    .filters {
+      flex-direction: row;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .search input {
+      max-width: 320px;
+    }
+  }
+</style>

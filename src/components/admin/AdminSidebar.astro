@@ -1,0 +1,374 @@
+---
+interface Props {
+  productCount?: number;
+  pendingOrderCount?: number;
+}
+
+const { productCount, pendingOrderCount } = Astro.props;
+const current = Astro.url.pathname;
+
+function isActive(href: string): boolean {
+  if (href === '/admin') return current === '/admin' || current === '/admin/';
+  return current === href || current.startsWith(href + '/');
+}
+
+const operate = [
+  { href: '/admin', label: 'Dashboard' },
+  { href: '/admin/products', label: 'Products', badge: productCount },
+  {
+    href: '/admin/orders',
+    label: 'Orders',
+    badge: pendingOrderCount,
+    badgeKind: 'amber' as const,
+  },
+  { href: '/admin/customers', label: 'Customers' },
+];
+
+const grow = [
+  { href: '/admin/discounts', label: 'Discounts' },
+  { href: '/admin/analytics', label: 'Analytics' },
+];
+
+const settings = [
+  { href: '/admin/settings/users', label: 'Users' },
+  { href: '/admin/settings/business', label: 'Business info' },
+  { href: '/admin/settings/shipping', label: 'Shipping' },
+  { href: '/admin/settings/integrations', label: 'Integrations' },
+];
+---
+
+<button
+  type="button"
+  class="sidebar-toggle"
+  id="sidebar-toggle"
+  aria-label="Open navigation"
+  aria-controls="admin-sidebar"
+  aria-expanded="false"
+>
+  ☰
+</button>
+
+<div class="sidebar-overlay" id="sidebar-overlay" hidden></div>
+
+<aside class="sidebar" id="admin-sidebar" aria-label="Admin navigation">
+  <div class="brand">
+    <div class="brand-title">Turquoise Co.</div>
+    <div class="brand-sub">Admin</div>
+  </div>
+
+  <nav class="groups">
+    <div class="group">
+      <div class="group-label">Operate</div>
+      <ul>
+        {
+          operate.map((item) => (
+            <li>
+              <a href={item.href} class:list={['nav-item', { active: isActive(item.href) }]}>
+                <span class="label">{item.label}</span>
+                {typeof item.badge === 'number' && item.badge > 0 && (
+                  <span
+                    class:list={[
+                      'badge',
+                      { 'badge-amber': item.badgeKind === 'amber' },
+                    ]}
+                  >
+                    {item.badge}
+                  </span>
+                )}
+                {typeof item.badge === 'number' && item.badge === 0 && item.badgeKind !== 'amber' && (
+                  <span class="badge">{item.badge}</span>
+                )}
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <div class="group">
+      <div class="group-label">Grow</div>
+      <ul>
+        {
+          grow.map((item) => (
+            <li>
+              <a href={item.href} class:list={['nav-item', 'nav-item-muted', { active: isActive(item.href) }]}>
+                <span class="label">{item.label}</span>
+                <span class="tag">later</span>
+              </a>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+
+    <div class="group">
+      <div class="group-label">Configure</div>
+      <ul>
+        <li>
+          <div class="nav-item nav-parent" aria-hidden="true">
+            <span class="label">Settings</span>
+          </div>
+          <ul class="subnav">
+            {
+              settings.map((s) => (
+                <li>
+                  <a href={s.href} class:list={['subnav-item', { active: isActive(s.href) }]}>
+                    {s.label}
+                  </a>
+                </li>
+              ))
+            }
+          </ul>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="footer">
+    <a href="/admin/logout" class="nav-item logout">
+      <span class="label">Log out</span>
+    </a>
+  </div>
+</aside>
+
+<script>
+  const toggle = document.getElementById('sidebar-toggle') as HTMLButtonElement;
+  const overlay = document.getElementById('sidebar-overlay') as HTMLElement;
+  const sidebar = document.getElementById('admin-sidebar') as HTMLElement;
+
+  function open() {
+    sidebar.classList.add('open');
+    overlay.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+  }
+  function close() {
+    sidebar.classList.remove('open');
+    overlay.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+
+  toggle.addEventListener('click', () => {
+    if (sidebar.classList.contains('open')) close();
+    else open();
+  });
+  overlay.addEventListener('click', close);
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && sidebar.classList.contains('open')) close();
+  });
+
+  // Close the drawer when a link inside it is tapped (mobile UX).
+  sidebar.addEventListener('click', (e) => {
+    const a = (e.target as HTMLElement).closest('a');
+    if (a && sidebar.classList.contains('open')) close();
+  });
+</script>
+
+<style>
+  .sidebar {
+    width: 200px;
+    flex-shrink: 0;
+    background: var(--bg);
+    border-right: 1px solid var(--border);
+    padding: 1rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    box-sizing: border-box;
+  }
+
+  .brand {
+    padding: 0.25rem 0.5rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .brand-title {
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--text);
+  }
+  .brand-sub {
+    margin-top: 0.1rem;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+  }
+
+  .groups {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  .group-label {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 0.55rem;
+    margin-bottom: 0.3rem;
+  }
+
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+  }
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding: 0.45rem 0.55rem;
+    border: 0.5px solid transparent;
+    border-radius: 6px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 400;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .nav-item:hover {
+    background: rgba(0, 0, 0, 0.035);
+  }
+  .nav-item.active {
+    background: var(--panel);
+    border-color: var(--border);
+    font-weight: 500;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  .nav-item-muted .label {
+    color: var(--muted);
+  }
+  .nav-item.nav-item-muted.active .label {
+    color: var(--text);
+  }
+
+  .nav-parent {
+    color: var(--muted);
+    cursor: default;
+  }
+  .nav-parent:hover {
+    background: transparent;
+  }
+
+  .badge {
+    font-size: 0.68rem;
+    line-height: 1;
+    padding: 0.2rem 0.42rem;
+    border-radius: 999px;
+    background: var(--muted-bg);
+    color: var(--muted);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .badge-amber {
+    background: var(--amber);
+    color: #fff;
+  }
+
+  .tag {
+    font-size: 0.65rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+  }
+
+  .subnav {
+    margin: 0.2rem 0 0.25rem 0.65rem;
+    padding-left: 0.65rem;
+    border-left: 1px solid var(--border);
+    gap: 0;
+  }
+  .subnav-item {
+    display: block;
+    padding: 0.32rem 0.5rem;
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-decoration: none;
+    border-radius: 4px;
+    font-weight: 400;
+    transition: color 0.12s, background 0.12s;
+  }
+  .subnav-item:hover {
+    color: var(--text);
+    background: rgba(0, 0, 0, 0.035);
+  }
+  .subnav-item.active {
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .footer {
+    margin-top: auto;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .logout {
+    color: var(--muted);
+  }
+  .logout:hover {
+    color: var(--text);
+  }
+
+  .sidebar-toggle {
+    display: none;
+    position: fixed;
+    top: 0.65rem;
+    left: 0.65rem;
+    z-index: 40;
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    font-size: 1.1rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    cursor: pointer;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+  .sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.35);
+    z-index: 20;
+  }
+
+  @media (max-width: 767px) {
+    .sidebar-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .sidebar-overlay:not([hidden]) {
+      display: block;
+    }
+    .sidebar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 30;
+      width: min(260px, 82vw);
+      transform: translateX(-100%);
+      transition: transform 0.18s ease-out;
+      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.08);
+    }
+    .sidebar.open {
+      transform: translateX(0);
+    }
+  }
+</style>

@@ -1,0 +1,427 @@
+---
+import type { Product } from '~/lib/supabase/types';
+import ImageSlots from './ImageSlots.astro';
+
+interface SlotData {
+  slot_index: number;
+  storage_path: string | null;
+  url: string | null;
+}
+
+interface Props {
+  product?: Product | null;
+  mode: 'create' | 'edit';
+  productId: string;
+  initialImages?: SlotData[];
+}
+
+const { product = null, mode, productId, initialImages = [] } = Astro.props;
+
+const priceDollars =
+  product && typeof product.price_cents === 'number'
+    ? (product.price_cents / 100).toFixed(2)
+    : '';
+const costDollars =
+  product && typeof product.cost_cents === 'number' && product.cost_cents !== null
+    ? (product.cost_cents / 100).toFixed(2)
+    : '';
+---
+
+<form id="product-form" data-mode={mode} data-id={productId}>
+  <div class="flash" id="form-flash" hidden></div>
+
+  <div class="product-form-grid">
+    <div class="fields-col">
+      {product?.piece_id && <div class="piece-label muted">Piece {product.piece_id}</div>}
+
+      <div class="form-grid">
+        <div class="full">
+          <label for="title">Title *</label>
+          <input id="title" name="title" required value={product?.title ?? ''} />
+        </div>
+
+        <div class="full">
+          <label for="slug">Slug *</label>
+          <input
+            id="slug"
+            name="slug"
+            required
+            pattern="^[a-z0-9]+(-[a-z0-9]+)*$"
+            value={product?.slug ?? ''}
+            data-touched={product ? 'true' : 'false'}
+          />
+          <div class="hint muted">Lowercase letters, numbers, and single dashes. Must be unique.</div>
+        </div>
+
+        <div class="full">
+          <label for="description">Description</label>
+          <textarea id="description" name="description" rows="6">{product?.description ?? ''}</textarea>
+          <div class="hint muted">Line breaks preserved on the product page.</div>
+        </div>
+
+        <div>
+          <label for="price_dollars">Price *</label>
+          <div class="price-input">
+            <input
+              id="price_dollars"
+              name="price_dollars"
+              type="number"
+              min="0"
+              step="0.01"
+              required
+              value={priceDollars}
+            />
+          </div>
+        </div>
+
+        <div>
+          <label for="cost_dollars">Cost (admin only)</label>
+          <div class="price-input">
+            <input
+              id="cost_dollars"
+              name="cost_dollars"
+              type="number"
+              min="0"
+              step="0.01"
+              value={costDollars}
+            />
+          </div>
+          <div class="hint muted">What materials cost you. Never shown publicly.</div>
+        </div>
+
+        <div class="full">
+          <label class="checkbox">
+            <input type="checkbox" id="featured" name="featured" checked={product?.featured ?? false} />
+            <span>Feature on homepage</span>
+          </label>
+        </div>
+
+        <div>
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            {
+              (['draft', 'published', 'sold', 'archived'] as const).map((s) => (
+                <option value={s} selected={product?.status === s}>
+                  {s}
+                </option>
+              ))
+            }
+          </select>
+        </div>
+
+        <div>
+          <label for="bead_size">Bead size</label>
+          <input
+            id="bead_size"
+            name="bead_size"
+            placeholder='6mm round, graduated 4-8mm, etc.'
+            value={product?.bead_size ?? ''}
+          />
+        </div>
+
+        <div>
+          <label for="turquoise_type">Turquoise type</label>
+          <input
+            id="turquoise_type"
+            name="turquoise_type"
+            placeholder="Royston, Kingman, Spiderweb…"
+            value={product?.turquoise_type ?? ''}
+          />
+        </div>
+
+        <div>
+          <label for="metal">Metal</label>
+          <input id="metal" name="metal" placeholder="Sterling Silver, Copper…" value={product?.metal ?? ''} />
+        </div>
+
+        <div>
+          <label for="stone_origin">Stone origin</label>
+          <input id="stone_origin" name="stone_origin" value={product?.stone_origin ?? ''} />
+        </div>
+
+        <div>
+          <label for="length">Length</label>
+          <input id="length" name="length" placeholder={'18"'} value={product?.length ?? ''} />
+        </div>
+
+        <div>
+          <label for="weight_oz">Weight (oz)</label>
+          <input
+            id="weight_oz"
+            name="weight_oz"
+            type="number"
+            step="0.01"
+            min="0"
+            value={product?.weight_oz ?? ''}
+          />
+        </div>
+
+        <div class="full">
+          <label for="meta_description">Meta description (SEO)</label>
+          <input id="meta_description" name="meta_description" value={product?.meta_description ?? ''} />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn-primary" id="submit-btn">
+          {mode === 'create' ? 'Create product' : 'Save changes'}
+        </button>
+        {
+          mode === 'edit' && product && product.status !== 'sold' && (
+            <button type="button" class="btn" id="mark-sold">
+              Mark as sold
+            </button>
+          )
+        }
+        {
+          mode === 'edit' && product && product.status !== 'archived' && (
+            <button type="button" class="btn btn-danger" id="archive-btn">
+              Archive
+            </button>
+          )
+        }
+      </div>
+    </div>
+
+    <aside class="image-col">
+      <div class="image-col-inner">
+        <ImageSlots
+          productId={productId}
+          mode={mode === 'create' ? 'draft' : 'existing'}
+          initial={initialImages}
+        />
+      </div>
+    </aside>
+  </div>
+</form>
+
+<script>
+  function toSlug(input: string): string {
+    return input
+      .toLowerCase()
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9\s-]/g, '')
+      .trim()
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  const form = document.getElementById('product-form') as HTMLFormElement;
+  const titleInput = document.getElementById('title') as HTMLInputElement;
+  const slugInput = document.getElementById('slug') as HTMLInputElement;
+  const flash = document.getElementById('form-flash') as HTMLDivElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  const mode = form.dataset.mode as 'create' | 'edit';
+  const productId = form.dataset.id || '';
+
+  slugInput.addEventListener('input', () => {
+    slugInput.dataset.touched = 'true';
+  });
+
+  titleInput.addEventListener('input', () => {
+    if (slugInput.dataset.touched !== 'true') {
+      slugInput.value = toSlug(titleInput.value);
+    }
+  });
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+  }
+
+  function toCents(raw: FormDataEntryValue | null): number | null {
+    const s = typeof raw === 'string' ? raw.trim() : '';
+    if (s === '') return null;
+    const n = parseFloat(s);
+    return Number.isFinite(n) ? Math.round(n * 100) : NaN;
+  }
+
+  function collectImages(): Array<{ slot_index: number; storage_path: string }> {
+    let result: Array<{ slot_index: number; storage_path: string }> = [];
+    window.dispatchEvent(
+      new CustomEvent('image-slots:get', {
+        detail: {
+          callback: (imgs: Array<{ slot_index: number; storage_path: string }>) => {
+            result = imgs;
+          },
+        },
+      }),
+    );
+    return result;
+  }
+
+  function collectPayload() {
+    const fd = new FormData(form);
+    const priceCents = toCents(fd.get('price_dollars'));
+    const costCents = toCents(fd.get('cost_dollars'));
+    const weightRaw = fd.get('weight_oz');
+    const weightStr = typeof weightRaw === 'string' ? weightRaw.trim() : '';
+    const weight = weightStr === '' ? null : parseFloat(weightStr);
+
+    return {
+      title: String(fd.get('title') ?? '').trim(),
+      slug: String(fd.get('slug') ?? '').trim(),
+      description: String(fd.get('description') ?? ''),
+      price_cents: priceCents,
+      cost_cents: costCents,
+      status: String(fd.get('status') ?? 'draft'),
+      featured: fd.get('featured') === 'on',
+      bead_size: String(fd.get('bead_size') ?? ''),
+      turquoise_type: String(fd.get('turquoise_type') ?? ''),
+      metal: String(fd.get('metal') ?? ''),
+      stone_origin: String(fd.get('stone_origin') ?? ''),
+      length: String(fd.get('length') ?? ''),
+      weight_oz: weight,
+      meta_description: String(fd.get('meta_description') ?? ''),
+    };
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    flash.hidden = true;
+    submitBtn.disabled = true;
+
+    const payload = collectPayload() as Record<string, unknown>;
+    if (!Number.isFinite(payload.price_cents as number) || payload.price_cents === null) {
+      showFlash('error', 'Price is required');
+      submitBtn.disabled = false;
+      return;
+    }
+    if (Number.isNaN(payload.cost_cents as number)) {
+      showFlash('error', 'Cost must be a number');
+      submitBtn.disabled = false;
+      return;
+    }
+
+    if (mode === 'create') {
+      payload.id = productId;
+      payload.images = collectImages();
+    }
+
+    const url = mode === 'create' ? '/api/admin/products' : `/api/admin/products/${productId}`;
+    const method = mode === 'create' ? 'POST' : 'PATCH';
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Save failed');
+        submitBtn.disabled = false;
+        return;
+      }
+
+      if (mode === 'create') {
+        window.location.href = `/admin/products/${json.data.id}/edit`;
+      } else {
+        showFlash('success', 'Saved');
+        submitBtn.disabled = false;
+      }
+    } catch {
+      showFlash('error', 'Network error');
+      submitBtn.disabled = false;
+    }
+  });
+
+  const markSoldBtn = document.getElementById('mark-sold');
+  markSoldBtn?.addEventListener('click', async () => {
+    if (!confirm('Mark this product as sold?')) return;
+    const res = await fetch(`/api/admin/products/${productId}/mark-sold`, { method: 'POST' });
+    const json = await res.json();
+    if (json.ok) {
+      window.location.reload();
+    } else {
+      showFlash('error', json.error || 'Failed to mark as sold');
+    }
+  });
+
+  const archiveBtn = document.getElementById('archive-btn');
+  archiveBtn?.addEventListener('click', async () => {
+    if (!confirm('Archive this product? It will stop showing on the storefront.')) return;
+    const res = await fetch(`/api/admin/products/${productId}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (json.ok) {
+      window.location.href = '/admin';
+    } else {
+      showFlash('error', json.error || 'Failed to archive');
+    }
+  });
+</script>
+
+<style>
+  form {
+    max-width: 100%;
+  }
+
+  .product-form-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.25rem;
+  }
+  .image-col {
+    order: -1;
+  }
+  .fields-col {
+    order: 0;
+  }
+  @media (min-width: 900px) {
+    .product-form-grid {
+      grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+      gap: 1.75rem;
+      align-items: start;
+    }
+    .fields-col {
+      order: 0;
+      grid-column: 1;
+    }
+    .image-col {
+      order: 0;
+      grid-column: 2;
+      position: sticky;
+      top: 1rem;
+      align-self: start;
+    }
+  }
+
+  .piece-label {
+    font-size: 0.78rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+  }
+
+  .hint {
+    font-size: 0.82rem;
+    margin-top: 0.25rem;
+  }
+  textarea {
+    resize: vertical;
+  }
+
+  .checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .checkbox input {
+    width: auto;
+    margin: 0;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+  }
+</style>

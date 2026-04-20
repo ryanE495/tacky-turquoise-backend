@@ -1,0 +1,20 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import ProductForm from '~/components/admin/ProductForm.astro';
+
+export const prerender = false;
+
+// Generate the product UUID server-side so the same id can be reused for
+// storage paths during draft uploads and for the eventual INSERT.
+const productId = crypto.randomUUID();
+---
+
+<AdminLayout title="New Product">
+  <div class="page-header">
+    <h1>New Product</h1>
+    <a class="btn" href="/admin">Cancel</a>
+  </div>
+  <div class="panel">
+    <ProductForm mode="create" productId={productId} />
+  </div>
+</AdminLayout>

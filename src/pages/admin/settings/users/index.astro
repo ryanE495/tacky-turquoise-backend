@@ -1,0 +1,50 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import SettingsNav from '~/components/admin/SettingsNav.astro';
+import InviteUserForm from '~/components/admin/InviteUserForm.astro';
+import UserList from '~/components/admin/UserList.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { listAdminUsers } from '~/lib/users';
+
+export const prerender = false;
+
+const supabase = createSupabaseAdminClient();
+let users: Awaited<ReturnType<typeof listAdminUsers>> = [];
+let loadError: string | null = null;
+try {
+  users = await listAdminUsers(supabase);
+} catch (e) {
+  loadError = (e as Error).message;
+}
+
+const currentUserId = Astro.locals.user?.id ?? null;
+---
+
+<AdminLayout title="Users">
+  <div class="page-header">
+    <h1>Users</h1>
+  </div>
+
+  <SettingsNav />
+
+  <section class="section">
+    <h2>Invite a new admin</h2>
+    <InviteUserForm />
+  </section>
+
+  <section class="section">
+    <h2>All admins</h2>
+    {loadError && <div class="flash flash-error">{loadError}</div>}
+    <UserList users={users} currentUserId={currentUserId} />
+  </section>
+</AdminLayout>
+
+<style>
+  .section {
+    margin-bottom: 2rem;
+  }
+  h2 {
+    font-size: 1.05rem;
+    margin: 0 0 0.6rem;
+  }
+</style>

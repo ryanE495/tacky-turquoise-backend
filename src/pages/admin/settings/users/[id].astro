@@ -1,0 +1,35 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import SettingsNav from '~/components/admin/SettingsNav.astro';
+import EditUserForm from '~/components/admin/EditUserForm.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { getAdminUserById } from '~/lib/users';
+
+export const prerender = false;
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect('/admin/settings/users');
+
+const supabase = createSupabaseAdminClient();
+const user = await getAdminUserById(supabase, id);
+
+if (!user) return Astro.redirect('/admin/settings/users');
+
+const isSelf = Astro.locals.user?.id === user.id;
+---
+
+<AdminLayout title={`Edit · ${user.display_name || user.email || 'User'}`}>
+  <div class="page-header">
+    <div>
+      <h1>Edit user</h1>
+      <div class="muted">{user.email}</div>
+    </div>
+    <a class="btn" href="/admin/settings/users">Back</a>
+  </div>
+
+  <SettingsNav />
+
+  <div class="panel">
+    <EditUserForm user={user} isSelf={isSelf} />
+  </div>
+</AdminLayout>

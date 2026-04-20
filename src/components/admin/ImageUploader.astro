@@ -1,0 +1,374 @@
+---
+interface ImageItem {
+  id: string;
+  url: string;
+  alt_text: string | null;
+  display_order: number;
+}
+
+interface Props {
+  productId: string;
+  images: ImageItem[];
+}
+
+const { productId, images } = Astro.props;
+---
+
+<div class="uploader" data-product-id={productId}>
+  <div class="flash" id="upload-flash" hidden></div>
+
+  <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Upload images">
+    <input type="file" id="file-input" accept="image/*" multiple hidden />
+    <div class="dropzone-inner">
+      <strong>Drop images here</strong>
+      <span class="muted">or click to choose files · up to 10MB each</span>
+    </div>
+  </div>
+
+  <ul class="image-grid" id="image-grid">
+    {
+      images.map((img, idx) => (
+        <li class="image-card" data-id={img.id} draggable="true">
+          <div class="drag-handle" aria-label="Drag to reorder">⋮⋮</div>
+          <div class="thumb">
+            <img src={img.url} alt={img.alt_text ?? ''} />
+            {idx === 0 && <span class="primary-tag">Primary</span>}
+          </div>
+          <input
+            class="alt-input"
+            type="text"
+            placeholder="Alt text (accessibility)"
+            value={img.alt_text ?? ''}
+          />
+          <div class="card-actions">
+            <button type="button" class="btn save-alt">Save alt</button>
+            <button type="button" class="btn btn-danger delete-img">Delete</button>
+          </div>
+        </li>
+      ))
+    }
+  </ul>
+</div>
+
+<script>
+  const root = document.querySelector('.uploader') as HTMLElement;
+  const productId = root.dataset.productId!;
+  const dropzone = document.getElementById('dropzone') as HTMLElement;
+  const fileInput = document.getElementById('file-input') as HTMLInputElement;
+  const grid = document.getElementById('image-grid') as HTMLUListElement;
+  const flash = document.getElementById('upload-flash') as HTMLElement;
+
+  const MAX_BYTES = 10 * 1024 * 1024;
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+    if (kind === 'success') {
+      setTimeout(() => {
+        flash.hidden = true;
+      }, 2500);
+    }
+  }
+
+  function markPrimaryBadge() {
+    grid.querySelectorAll('.primary-tag').forEach((el) => el.remove());
+    const first = grid.querySelector('.image-card');
+    if (first) {
+      const thumb = first.querySelector('.thumb');
+      const tag = document.createElement('span');
+      tag.className = 'primary-tag';
+      tag.textContent = 'Primary';
+      thumb?.appendChild(tag);
+    }
+  }
+
+  function buildCard(data: {
+    id: string;
+    url: string;
+    alt_text: string | null;
+  }): HTMLLIElement {
+    const li = document.createElement('li');
+    li.className = 'image-card';
+    li.dataset.id = data.id;
+    li.draggable = true;
+    li.innerHTML = `
+      <div class="drag-handle" aria-label="Drag to reorder">⋮⋮</div>
+      <div class="thumb">
+        <img src="${data.url}" alt="${escapeAttr(data.alt_text ?? '')}" />
+      </div>
+      <input class="alt-input" type="text" placeholder="Alt text (accessibility)" value="${escapeAttr(data.alt_text ?? '')}" />
+      <div class="card-actions">
+        <button type="button" class="btn save-alt">Save alt</button>
+        <button type="button" class="btn btn-danger delete-img">Delete</button>
+      </div>
+    `;
+    wireCard(li);
+    return li;
+  }
+
+  function escapeAttr(s: string): string {
+    return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  async function uploadFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      showFlash('error', `${file.name}: not an image`);
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      showFlash('error', `${file.name}: exceeds 10MB`);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`/api/admin/products/${productId}/images`, {
+      method: 'POST',
+      body: fd,
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      showFlash('error', `${file.name}: ${json.error || 'upload failed'}`);
+      return;
+    }
+    const card = buildCard(json.data);
+    grid.appendChild(card);
+    markPrimaryBadge();
+    showFlash('success', `Uploaded ${file.name}`);
+  }
+
+  async function uploadFiles(files: FileList | File[]) {
+    for (const f of Array.from(files)) {
+      await uploadFile(f);
+    }
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files.length) {
+      uploadFiles(fileInput.files);
+      fileInput.value = '';
+    }
+  });
+
+  ['dragenter', 'dragover'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    }),
+  );
+  ['dragleave', 'drop'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+    }),
+  );
+  dropzone.addEventListener('drop', (e: DragEvent) => {
+    if (e.dataTransfer?.files && e.dataTransfer.files.length) {
+      uploadFiles(e.dataTransfer.files);
+    }
+  });
+
+  function wireCard(card: HTMLLIElement) {
+    const saveBtn = card.querySelector('.save-alt') as HTMLButtonElement;
+    const delBtn = card.querySelector('.delete-img') as HTMLButtonElement;
+    const altInput = card.querySelector('.alt-input') as HTMLInputElement;
+    const id = card.dataset.id!;
+
+    saveBtn.addEventListener('click', async () => {
+      saveBtn.disabled = true;
+      const res = await fetch(`/api/admin/products/${productId}/images/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ alt_text: altInput.value }),
+      });
+      const json = await res.json();
+      if (json.ok) showFlash('success', 'Alt text saved');
+      else showFlash('error', json.error || 'Save failed');
+      saveBtn.disabled = false;
+    });
+
+    delBtn.addEventListener('click', async () => {
+      if (!confirm('Delete this image?')) return;
+      const res = await fetch(`/api/admin/products/${productId}/images/${id}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (json.ok) {
+        card.remove();
+        markPrimaryBadge();
+        showFlash('success', 'Image deleted');
+      } else {
+        showFlash('error', json.error || 'Delete failed');
+      }
+    });
+
+    card.addEventListener('dragstart', (e) => {
+      card.classList.add('dragging');
+      e.dataTransfer?.setData('text/plain', id);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+    });
+  }
+
+  grid.querySelectorAll<HTMLLIElement>('.image-card').forEach(wireCard);
+
+  grid.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    const dragging = grid.querySelector('.dragging') as HTMLLIElement | null;
+    if (!dragging) return;
+    const afterEl = getDragAfterElement(grid, e.clientX, e.clientY);
+    if (!afterEl) grid.appendChild(dragging);
+    else grid.insertBefore(dragging, afterEl);
+  });
+
+  grid.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    await persistOrder();
+    markPrimaryBadge();
+  });
+
+  function getDragAfterElement(container: HTMLElement, x: number, y: number): HTMLElement | null {
+    const cards = Array.from(container.querySelectorAll<HTMLLIElement>('.image-card:not(.dragging)'));
+    let closest: { offset: number; el: HTMLElement | null } = { offset: Number.NEGATIVE_INFINITY, el: null };
+    for (const card of cards) {
+      const box = card.getBoundingClientRect();
+      const offsetY = y - (box.top + box.height / 2);
+      const offsetX = x - (box.left + box.width / 2);
+      const offset = offsetY < 0 ? offsetY : offsetX < 0 ? offsetX : Number.NEGATIVE_INFINITY;
+      if (offset > closest.offset && offset < 0) {
+        closest = { offset, el: card };
+      }
+    }
+    return closest.el;
+  }
+
+  async function persistOrder() {
+    const cards = Array.from(grid.querySelectorAll<HTMLLIElement>('.image-card'));
+    const updates = cards.map((card, idx) =>
+      fetch(`/api/admin/products/${productId}/images/${card.dataset.id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ display_order: idx }),
+      }),
+    );
+    try {
+      const results = await Promise.all(updates);
+      const failed = results.find((r) => !r.ok);
+      if (failed) showFlash('error', 'Some reorder updates failed');
+      else showFlash('success', 'Order saved');
+    } catch {
+      showFlash('error', 'Reorder failed');
+    }
+  }
+</script>
+
+<style>
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    background: #fbfaf6;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .dropzone:hover,
+  .dropzone:focus {
+    border-color: var(--accent);
+    background: #f5f2ea;
+    outline: none;
+  }
+  .dropzone.drag-over {
+    border-color: var(--accent);
+    background: #e9f0ef;
+  }
+  .dropzone-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--muted);
+  }
+  .dropzone-inner strong {
+    color: var(--text);
+    font-size: 1.05rem;
+  }
+
+  .image-grid {
+    list-style: none;
+    padding: 0;
+    margin: 1.25rem 0 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 0.9rem;
+  }
+  .image-card {
+    position: relative;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.7rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    cursor: grab;
+  }
+  .image-card.dragging {
+    opacity: 0.4;
+  }
+  .drag-handle {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    border-radius: 4px;
+    padding: 0 6px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    user-select: none;
+  }
+  .thumb {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--muted-bg);
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .primary-tag {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .alt-input {
+    font-size: 0.88rem;
+  }
+  .card-actions {
+    display: flex;
+    gap: 0.4rem;
+  }
+  .card-actions .btn {
+    flex: 1;
+    padding: 0.4rem 0.5rem;
+    font-size: 0.85rem;
+  }
+</style>

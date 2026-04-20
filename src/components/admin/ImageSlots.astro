@@ -1,0 +1,395 @@
+---
+// Fixed 5-slot image grid. One primary (slot 0) + four secondary (slots 1-4).
+// Two modes:
+//   draft    - uploads go to /api/admin/products/draft-upload using a
+//              client-provided product UUID. Nothing is persisted to the
+//              product_images table until the product is created.
+//   existing - uploads go to /api/admin/products/[id]/images (upserts).
+//              Deletes hit /api/admin/products/[id]/images/slot/[n].
+//
+// In draft mode, removing a slot deletes the storage object via the draft
+// endpoint so we don't accumulate orphans from simple add-then-remove cycles.
+
+interface SlotData {
+  slot_index: number;
+  storage_path: string | null;
+  url: string | null;
+}
+
+interface Props {
+  productId: string;
+  mode: 'draft' | 'existing';
+  initial?: SlotData[];
+}
+
+const { productId, mode, initial = [] } = Astro.props;
+
+function blankSlots(): SlotData[] {
+  return [0, 1, 2, 3, 4].map((i) => ({ slot_index: i, storage_path: null, url: null }));
+}
+
+const slots = blankSlots();
+for (const s of initial) {
+  if (s.slot_index >= 0 && s.slot_index <= 4) {
+    slots[s.slot_index] = { ...s };
+  }
+}
+
+const initialJson = JSON.stringify(slots);
+---
+
+<div class="image-slots" data-mode={mode} data-product-id={productId} data-initial={initialJson}>
+  <div class="flash" id="slots-flash" hidden></div>
+
+  <div class="slot-primary">
+    <div class="slot" data-slot="0"></div>
+  </div>
+
+  <div class="secondary-label muted">Additional images</div>
+
+  <div class="slot-grid">
+    <div class="slot" data-slot="1"></div>
+    <div class="slot" data-slot="2"></div>
+    <div class="slot" data-slot="3"></div>
+    <div class="slot" data-slot="4"></div>
+  </div>
+
+  <p class="helper muted">
+    Main image shows in product cards. All 5 images appear on the product detail page. JPG,
+    PNG, or WebP. 10MB max each.
+  </p>
+</div>
+
+<script>
+  type SlotData = { slot_index: number; storage_path: string | null; url: string | null };
+
+  const MAX_BYTES = 10 * 1024 * 1024;
+
+  const root = document.querySelector('.image-slots') as HTMLElement;
+  const flash = document.getElementById('slots-flash') as HTMLElement;
+  const mode = root.dataset.mode as 'draft' | 'existing';
+  const productId = root.dataset.productId!;
+  const state: SlotData[] = JSON.parse(root.dataset.initial || '[]');
+
+  window.addEventListener('image-slots:get', (e) => {
+    const detail = (e as CustomEvent).detail;
+    if (typeof detail?.callback === 'function') {
+      detail.callback(
+        state
+          .filter((s) => s.storage_path)
+          .map((s) => ({ slot_index: s.slot_index, storage_path: s.storage_path as string })),
+      );
+    }
+  });
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+    if (kind === 'success') {
+      setTimeout(() => {
+        flash.hidden = true;
+      }, 2000);
+    }
+  }
+
+  function renderSlot(slotIndex: number) {
+    const el = root.querySelector<HTMLElement>(`.slot[data-slot="${slotIndex}"]`)!;
+    const s = state[slotIndex];
+    el.innerHTML = '';
+
+    if (s.url && s.storage_path) {
+      el.classList.add('filled');
+      el.classList.remove('empty');
+
+      const img = document.createElement('img');
+      img.src = s.url;
+      img.alt = '';
+      el.appendChild(img);
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'slot-btn slot-delete';
+      del.setAttribute('aria-label', 'Remove image');
+      del.textContent = '×';
+      del.addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleDelete(slotIndex);
+      });
+      el.appendChild(del);
+
+      const replace = document.createElement('button');
+      replace.type = 'button';
+      replace.className = 'slot-btn slot-replace';
+      replace.setAttribute('aria-label', 'Replace image');
+      replace.innerHTML = '&#9851;';
+      replace.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFilePicker(slotIndex);
+      });
+      el.appendChild(replace);
+    } else {
+      el.classList.add('empty');
+      el.classList.remove('filled');
+      const hint = document.createElement('div');
+      hint.className = 'slot-hint';
+      hint.textContent = slotIndex === 0 ? '+ Add main image' : '+ Add image';
+      el.appendChild(hint);
+    }
+  }
+
+  function openFilePicker(slotIndex: number) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.addEventListener('change', () => {
+      if (input.files && input.files[0]) handleUpload(slotIndex, input.files[0]);
+    });
+    input.click();
+  }
+
+  async function handleUpload(slotIndex: number, file: File) {
+    if (!file.type.startsWith('image/')) {
+      showFlash('error', `${file.name}: not an image`);
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      showFlash('error', `${file.name}: exceeds 10MB`);
+      return;
+    }
+
+    const slotEl = root.querySelector<HTMLElement>(`.slot[data-slot="${slotIndex}"]`);
+    slotEl?.classList.add('uploading');
+
+    try {
+      if (mode === 'draft') {
+        const prev = state[slotIndex].storage_path;
+        const fd = new FormData();
+        fd.append('product_id', productId);
+        fd.append('slot_index', String(slotIndex));
+        fd.append('file', file);
+        const res = await fetch('/api/admin/products/draft-upload', {
+          method: 'POST',
+          body: fd,
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Upload failed');
+        state[slotIndex] = {
+          slot_index: slotIndex,
+          storage_path: json.data.storage_path,
+          url: json.data.public_url,
+        };
+        renderSlot(slotIndex);
+        if (prev) {
+          fetch('/api/admin/products/draft-upload', {
+            method: 'DELETE',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ storage_path: prev }),
+          }).catch(() => {});
+        }
+      } else {
+        const fd = new FormData();
+        fd.append('slot_index', String(slotIndex));
+        fd.append('file', file);
+        const res = await fetch(`/api/admin/products/${productId}/images`, {
+          method: 'POST',
+          body: fd,
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Upload failed');
+        state[slotIndex] = {
+          slot_index: slotIndex,
+          storage_path: json.data.storage_path,
+          url: json.data.url,
+        };
+        renderSlot(slotIndex);
+      }
+      showFlash('success', 'Uploaded');
+    } catch (err) {
+      showFlash('error', (err as Error).message);
+    } finally {
+      slotEl?.classList.remove('uploading');
+    }
+  }
+
+  async function handleDelete(slotIndex: number) {
+    if (!confirm('Remove this image?')) return;
+    const s = state[slotIndex];
+    if (!s.storage_path) return;
+
+    try {
+      if (mode === 'draft') {
+        const res = await fetch('/api/admin/products/draft-upload', {
+          method: 'DELETE',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ storage_path: s.storage_path }),
+        });
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Delete failed');
+      } else {
+        const res = await fetch(
+          `/api/admin/products/${productId}/images/slot/${slotIndex}`,
+          { method: 'DELETE' },
+        );
+        const json = await res.json();
+        if (!json.ok) throw new Error(json.error || 'Delete failed');
+      }
+      state[slotIndex] = { slot_index: slotIndex, storage_path: null, url: null };
+      renderSlot(slotIndex);
+      showFlash('success', 'Removed');
+    } catch (err) {
+      showFlash('error', (err as Error).message);
+    }
+  }
+
+  for (let i = 0; i < 5; i += 1) {
+    const slotEl = root.querySelector<HTMLElement>(`.slot[data-slot="${i}"]`)!;
+
+    slotEl.addEventListener('click', (e) => {
+      if (e.target !== slotEl && !(e.target as HTMLElement).classList.contains('slot-hint')) {
+        return;
+      }
+      if (state[i].storage_path) return;
+      openFilePicker(i);
+    });
+
+    slotEl.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      slotEl.classList.add('drag-over');
+    });
+    slotEl.addEventListener('dragleave', () => {
+      slotEl.classList.remove('drag-over');
+    });
+    slotEl.addEventListener('drop', (e) => {
+      e.preventDefault();
+      slotEl.classList.remove('drag-over');
+      const f = e.dataTransfer?.files?.[0];
+      if (f) handleUpload(i, f);
+    });
+
+    renderSlot(i);
+  }
+</script>
+
+<style>
+  .image-slots {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .slot-primary {
+    width: 100%;
+  }
+  .slot-primary .slot {
+    height: 240px;
+  }
+  @media (min-width: 600px) {
+    .slot-primary .slot {
+      height: 280px;
+    }
+  }
+  .secondary-label {
+    font-size: 0.8rem;
+    font-weight: 500;
+    margin-top: 0.2rem;
+  }
+  .slot-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+  .slot-grid .slot {
+    aspect-ratio: 1 / 1;
+  }
+
+  .slot {
+    position: relative;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #fbfaf6;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .slot.empty {
+    border: 1.5px dashed var(--border);
+  }
+  .slot.empty:hover,
+  .slot.drag-over {
+    border-color: var(--accent);
+    background: #f2efe6;
+  }
+  .slot.filled {
+    border: 1px solid var(--border);
+    cursor: default;
+  }
+  .slot.uploading {
+    opacity: 0.6;
+  }
+  .slot img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .slot-hint {
+    color: var(--muted);
+    font-size: 0.88rem;
+    font-weight: 500;
+    padding: 0.5rem;
+    text-align: center;
+  }
+
+  .slot-btn {
+    position: absolute;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.6);
+    color: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+  }
+  .slot:hover .slot-btn {
+    opacity: 1;
+  }
+  @media (hover: none) {
+    .slot-btn {
+      opacity: 1;
+      width: 32px;
+      height: 32px;
+      font-size: 15px;
+    }
+  }
+  .slot-btn:hover {
+    background: rgba(0, 0, 0, 0.85);
+  }
+  .slot-delete {
+    top: 6px;
+    right: 6px;
+    font-size: 16px;
+  }
+  .slot-replace {
+    bottom: 6px;
+    right: 6px;
+  }
+
+  .helper {
+    font-size: 0.8rem;
+    margin: 0.35rem 0 0;
+  }
+
+  .flash {
+    margin-bottom: 0.4rem;
+  }
+</style>

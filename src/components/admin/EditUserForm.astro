@@ -1,0 +1,213 @@
+---
+import type { AdminUserRow } from '~/lib/users';
+
+interface Props {
+  user: AdminUserRow;
+  isSelf: boolean;
+}
+
+const { user, isSelf } = Astro.props;
+---
+
+<form id="edit-user-form" data-id={user.id} data-email={user.email ?? ''} data-self={isSelf.toString()}>
+  <div class="flash" id="edit-flash" hidden></div>
+
+  <div class="form-grid">
+    <div class="full">
+      <label for="display_name">Display name</label>
+      <input id="display_name" name="display_name" value={user.display_name ?? ''} />
+    </div>
+
+    <div class="full">
+      <label for="email">Email</label>
+      <input id="email" name="email" type="email" value={user.email ?? ''} disabled={isSelf} />
+      {
+        isSelf && (
+          <div class="hint muted">
+            You can't change your own email from here — use Supabase's account flow instead.
+          </div>
+        )
+      }
+    </div>
+  </div>
+
+  <div class="actions">
+    <button type="submit" class="btn-primary" id="save-btn">Save changes</button>
+    <button type="button" class="btn" id="reset-pw-btn">Send password reset</button>
+    <button
+      type="button"
+      class="btn btn-danger"
+      id="delete-btn"
+      disabled={isSelf}
+      title={isSelf ? "You can't delete yourself." : 'Delete user'}
+    >
+      Delete user
+    </button>
+  </div>
+</form>
+
+<dialog id="delete-modal">
+  <form method="dialog" id="delete-form">
+    <h3>Delete user</h3>
+    <p>
+      This permanently removes the account and their profile. To confirm, type their email:
+      <code id="confirm-email-display">{user.email}</code>
+    </p>
+    <input id="confirm-email-input" type="text" autocomplete="off" />
+    <div class="modal-actions">
+      <button type="button" class="btn" id="cancel-delete">Cancel</button>
+      <button type="button" class="btn btn-danger" id="confirm-delete">Delete</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+  const form = document.getElementById('edit-user-form') as HTMLFormElement;
+  const id = form.dataset.id!;
+  const email = form.dataset.email || '';
+  const isSelf = form.dataset.self === 'true';
+
+  const flash = document.getElementById('edit-flash') as HTMLElement;
+  const displayInput = document.getElementById('display_name') as HTMLInputElement;
+  const emailInput = document.getElementById('email') as HTMLInputElement;
+  const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
+  const resetBtn = document.getElementById('reset-pw-btn') as HTMLButtonElement;
+  const deleteBtn = document.getElementById('delete-btn') as HTMLButtonElement;
+
+  const modal = document.getElementById('delete-modal') as HTMLDialogElement;
+  const confirmInput = document.getElementById('confirm-email-input') as HTMLInputElement;
+  const confirmDelete = document.getElementById('confirm-delete') as HTMLButtonElement;
+  const cancelDelete = document.getElementById('cancel-delete') as HTMLButtonElement;
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    saveBtn.disabled = true;
+    flash.hidden = true;
+
+    const body: Record<string, unknown> = {
+      display_name: displayInput.value,
+    };
+    if (!isSelf && emailInput.value.trim().toLowerCase() !== email.toLowerCase()) {
+      body.email = emailInput.value.trim();
+    }
+
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Save failed');
+      } else {
+        showFlash('success', 'Saved');
+        if (typeof json.data?.email === 'string') {
+          form.dataset.email = json.data.email;
+          emailInput.value = json.data.email;
+        }
+      }
+    } catch {
+      showFlash('error', 'Network error');
+    }
+    saveBtn.disabled = false;
+  });
+
+  resetBtn.addEventListener('click', async () => {
+    resetBtn.disabled = true;
+    flash.hidden = true;
+    try {
+      const res = await fetch(`/api/admin/users/${id}/reset-password`, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) showFlash('success', 'Password reset email sent');
+      else showFlash('error', json.error || 'Reset failed');
+    } catch {
+      showFlash('error', 'Network error');
+    }
+    resetBtn.disabled = false;
+  });
+
+  deleteBtn.addEventListener('click', () => {
+    if (deleteBtn.disabled) return;
+    confirmInput.value = '';
+    modal.showModal();
+    confirmInput.focus();
+  });
+
+  cancelDelete.addEventListener('click', () => {
+    modal.close();
+  });
+
+  confirmDelete.addEventListener('click', async () => {
+    if (confirmInput.value.trim().toLowerCase() !== (form.dataset.email ?? '').toLowerCase()) {
+      showFlash('error', 'Email did not match.');
+      modal.close();
+      return;
+    }
+    confirmDelete.disabled = true;
+    try {
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.ok) {
+        window.location.href = '/admin/settings/users';
+      } else {
+        showFlash('error', json.error || 'Delete failed');
+        modal.close();
+      }
+    } catch {
+      showFlash('error', 'Network error');
+      modal.close();
+    }
+    confirmDelete.disabled = false;
+  });
+</script>
+
+<style>
+  form {
+    max-width: 640px;
+  }
+  .hint {
+    font-size: 0.82rem;
+    margin-top: 0.3rem;
+  }
+  .actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    flex-wrap: wrap;
+  }
+  dialog {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem 1.25rem 1rem;
+    max-width: 440px;
+    width: calc(100% - 2rem);
+  }
+  dialog::backdrop {
+    background: rgba(0, 0, 0, 0.45);
+  }
+  dialog h3 {
+    margin: 0 0 0.5rem;
+  }
+  dialog code {
+    background: var(--muted-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 4px;
+    font-size: 0.92em;
+  }
+  dialog input {
+    margin-top: 0.75rem;
+  }
+  .modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+</style>

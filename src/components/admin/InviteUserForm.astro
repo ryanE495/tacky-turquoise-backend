@@ -1,0 +1,183 @@
+---
+// POSTs to /api/admin/users. Two modes:
+//   invite   → sends email invite, user sets own password
+//   password → creates user immediately with the password you type
+---
+
+<form id="invite-form" class="invite" data-mode="invite">
+  <div class="mode-toggle" role="tablist" aria-label="How to add a user">
+    <button type="button" class="mode-btn active" data-mode="invite" role="tab" aria-selected="true">
+      Email invite
+    </button>
+    <button type="button" class="mode-btn" data-mode="password" role="tab" aria-selected="false">
+      Create with password
+    </button>
+  </div>
+
+  <div class="row">
+    <div class="field">
+      <label for="invite-email">Email</label>
+      <input id="invite-email" name="email" type="email" required placeholder="person@example.com" />
+    </div>
+    <div class="field">
+      <label for="invite-name">Display name</label>
+      <input id="invite-name" name="display_name" type="text" placeholder="(optional — defaults to email prefix)" />
+    </div>
+    <div class="field pw-field" hidden>
+      <label for="invite-password">Password</label>
+      <input id="invite-password" name="password" type="password" minlength="8" autocomplete="new-password" placeholder="At least 8 characters" />
+    </div>
+    <div class="field submit-field">
+      <button type="submit" class="btn-primary" id="invite-submit">Send invite</button>
+    </div>
+  </div>
+  <div class="mode-hint muted" id="mode-hint">
+    Sends an email with a link to set a password. Good for onboarding staff.
+  </div>
+  <div class="flash" id="invite-flash" hidden></div>
+</form>
+
+<script>
+  const form = document.getElementById('invite-form') as HTMLFormElement;
+  const emailEl = document.getElementById('invite-email') as HTMLInputElement;
+  const nameEl = document.getElementById('invite-name') as HTMLInputElement;
+  const pwField = form.querySelector('.pw-field') as HTMLElement;
+  const pwEl = document.getElementById('invite-password') as HTMLInputElement;
+  const submit = document.getElementById('invite-submit') as HTMLButtonElement;
+  const flash = document.getElementById('invite-flash') as HTMLDivElement;
+  const hint = document.getElementById('mode-hint') as HTMLElement;
+  const modeButtons = form.querySelectorAll<HTMLButtonElement>('.mode-btn');
+
+  const HINTS: Record<string, string> = {
+    invite:
+      'Sends an email with a link to set a password. Good for onboarding staff.',
+    password:
+      'Creates the account immediately with the password you type. No email is sent — share the login with them yourself.',
+  };
+
+  function applyMode(mode: 'invite' | 'password') {
+    form.dataset.mode = mode;
+    pwField.hidden = mode !== 'password';
+    pwEl.required = mode === 'password';
+    submit.textContent = mode === 'password' ? 'Add user' : 'Send invite';
+    hint.textContent = HINTS[mode];
+    for (const btn of modeButtons) {
+      const active = btn.dataset.mode === mode;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', active ? 'true' : 'false');
+    }
+  }
+
+  for (const btn of modeButtons) {
+    btn.addEventListener('click', () => {
+      applyMode(btn.dataset.mode as 'invite' | 'password');
+    });
+  }
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    submit.disabled = true;
+    flash.hidden = true;
+
+    const mode = form.dataset.mode as 'invite' | 'password';
+    const body: Record<string, unknown> = {
+      email: emailEl.value.trim(),
+      display_name: nameEl.value.trim() || null,
+    };
+    if (mode === 'password') body.password = pwEl.value;
+
+    try {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Request failed');
+        submit.disabled = false;
+        return;
+      }
+      showFlash(
+        'success',
+        mode === 'password'
+          ? `Created ${emailEl.value.trim()} — share the password with them.`
+          : `Invite sent to ${emailEl.value.trim()}`,
+      );
+      emailEl.value = '';
+      nameEl.value = '';
+      pwEl.value = '';
+      window.dispatchEvent(new CustomEvent('users:changed'));
+      submit.disabled = false;
+    } catch {
+      showFlash('error', 'Network error');
+      submit.disabled = false;
+    }
+  });
+</script>
+
+<style>
+  .invite {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+  }
+  .mode-toggle {
+    display: inline-flex;
+    gap: 0.25rem;
+    padding: 0.2rem;
+    background: var(--muted-bg);
+    border-radius: 999px;
+    margin-bottom: 0.9rem;
+  }
+  .mode-btn {
+    padding: 0.35rem 0.85rem;
+    font-size: 0.85rem;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 500;
+    width: auto;
+  }
+  .mode-btn.active {
+    background: var(--panel);
+    color: var(--text);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+  @media (min-width: 720px) {
+    .row {
+      grid-template-columns: 2fr 2fr auto;
+      align-items: end;
+    }
+    form[data-mode='password'] .row {
+      grid-template-columns: 2fr 2fr 1.5fr auto;
+    }
+    .submit-field {
+      align-self: end;
+    }
+  }
+  .submit-field button {
+    width: 100%;
+  }
+  .mode-hint {
+    margin-top: 0.6rem;
+    font-size: 0.85rem;
+  }
+  .flash {
+    margin-top: 0.75rem;
+  }
+</style>

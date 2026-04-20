@@ -1,0 +1,50 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import ProductForm from '~/components/admin/ProductForm.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { publicImageUrl } from '~/lib/images';
+import type { Product } from '~/lib/supabase/types';
+
+export const prerender = false;
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect('/admin');
+
+const supabase = createSupabaseAdminClient();
+const { data: product, error } = await supabase
+  .from('products')
+  .select('*')
+  .eq('id', id)
+  .maybeSingle();
+
+if (error || !product) {
+  return Astro.redirect('/admin');
+}
+
+const { data: imageRows } = await supabase
+  .from('product_images')
+  .select('storage_path, display_order')
+  .eq('product_id', id);
+
+const initialImages = (imageRows ?? []).map((r) => ({
+  slot_index: r.display_order,
+  storage_path: r.storage_path,
+  url: publicImageUrl(supabase, r.storage_path),
+}));
+
+const typed = product as Product;
+---
+
+<AdminLayout title={`Edit · ${typed.title}`}>
+  <div class="page-header">
+    <div>
+      <h1>Edit Product</h1>
+      <div class="muted">/{typed.slug}</div>
+    </div>
+    <a class="btn" href="/admin">Back</a>
+  </div>
+
+  <div class="panel">
+    <ProductForm mode="edit" product={typed} productId={typed.id} initialImages={initialImages} />
+  </div>
+</AdminLayout>

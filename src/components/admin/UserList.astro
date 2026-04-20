@@ -1,0 +1,223 @@
+---
+import type { AdminUserRow } from '~/lib/users';
+import { relativeTime } from '~/lib/format';
+
+interface Props {
+  users: AdminUserRow[];
+  currentUserId: string | null;
+}
+
+const { users, currentUserId } = Astro.props;
+
+function status(u: AdminUserRow): 'active' | 'pending' {
+  return u.email_confirmed_at ? 'active' : 'pending';
+}
+---
+
+<div class="list" id="user-list">
+  {
+    users.length === 0 ? (
+      <div class="empty muted">No users yet.</div>
+    ) : (
+      users.map((u) => {
+        const isSelf = currentUserId === u.id;
+        const s = status(u);
+        return (
+          <div class="row" data-id={u.id} data-status={s}>
+            <div class="name">
+              <span>{u.display_name || '—'}</span>
+              {isSelf && <span class="self">You</span>}
+            </div>
+            <div class="email muted">{u.email ?? ''}</div>
+            <div class="status">
+              <span class={`badge badge-${s === 'active' ? 'published' : 'sold'}`}>
+                {s === 'active' ? 'Active' : 'Pending invite'}
+              </span>
+            </div>
+            <div class="last-sign-in muted">{relativeTime(u.last_sign_in_at)}</div>
+            <div class="actions">
+              <a class="btn" href={`/admin/settings/users/${u.id}`}>
+                Edit
+              </a>
+              {s === 'pending' && (
+                <button type="button" class="btn resend" data-id={u.id}>
+                  Resend invite
+                </button>
+              )}
+              {s === 'active' && (
+                <button type="button" class="btn reset" data-id={u.id}>
+                  Reset password
+                </button>
+              )}
+              <button
+                type="button"
+                class="btn btn-danger delete"
+                data-id={u.id}
+                data-email={u.email ?? ''}
+                disabled={isSelf}
+                title={isSelf ? "You can't delete yourself." : 'Delete user'}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        );
+      })
+    )
+  }
+</div>
+
+<div class="flash" id="list-flash" hidden></div>
+
+<script>
+  const list = document.getElementById('user-list') as HTMLElement;
+  const flash = document.getElementById('list-flash') as HTMLElement;
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+    if (kind === 'success') {
+      setTimeout(() => {
+        flash.hidden = true;
+      }, 2500);
+    }
+  }
+
+  list.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+
+    const resendBtn = target.closest('.resend') as HTMLButtonElement | null;
+    if (resendBtn) {
+      resendBtn.disabled = true;
+      const id = resendBtn.dataset.id!;
+      const res = await fetch(`/api/admin/users/${id}/resend-invite`, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) showFlash('success', 'Invite resent');
+      else showFlash('error', json.error || 'Resend failed');
+      resendBtn.disabled = false;
+      return;
+    }
+
+    const resetBtn = target.closest('.reset') as HTMLButtonElement | null;
+    if (resetBtn) {
+      resetBtn.disabled = true;
+      const id = resetBtn.dataset.id!;
+      const res = await fetch(`/api/admin/users/${id}/reset-password`, { method: 'POST' });
+      const json = await res.json();
+      if (json.ok) showFlash('success', 'Password reset email sent');
+      else showFlash('error', json.error || 'Reset failed');
+      resetBtn.disabled = false;
+      return;
+    }
+
+    const deleteBtn = target.closest('.delete') as HTMLButtonElement | null;
+    if (deleteBtn) {
+      if (deleteBtn.disabled) return;
+      const email = deleteBtn.dataset.email || '';
+      const typed = prompt(`Type the email "${email}" to confirm deletion:`);
+      if (typed !== email) {
+        if (typed !== null) showFlash('error', 'Email did not match — deletion cancelled.');
+        return;
+      }
+      deleteBtn.disabled = true;
+      const id = deleteBtn.dataset.id!;
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.ok) {
+        showFlash('success', 'User deleted');
+        window.dispatchEvent(new CustomEvent('users:changed'));
+      } else {
+        showFlash('error', json.error || 'Delete failed');
+        deleteBtn.disabled = false;
+      }
+      return;
+    }
+  });
+
+  window.addEventListener('users:changed', () => {
+    window.location.reload();
+  });
+</script>
+
+<style>
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+    margin-top: 1rem;
+  }
+  .empty {
+    padding: 2rem;
+    text-align: center;
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 1.3fr 1.6fr auto auto 1fr;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.75rem 0.9rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .name {
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+  .self {
+    font-size: 0.7rem;
+    background: var(--accent);
+    color: #fff;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .email {
+    font-size: 0.92rem;
+    overflow-wrap: anywhere;
+  }
+  .last-sign-in {
+    font-size: 0.88rem;
+  }
+  .actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+  }
+  .actions .btn {
+    padding: 0.35rem 0.6rem;
+    font-size: 0.82rem;
+  }
+  @media (max-width: 900px) {
+    .actions .btn {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.85rem;
+    }
+    .row {
+      grid-template-columns: 1fr auto;
+      row-gap: 0.35rem;
+    }
+    .email,
+    .last-sign-in {
+      grid-column: 1 / -1;
+    }
+    .status {
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: end;
+    }
+    .actions {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+    }
+  }
+</style>

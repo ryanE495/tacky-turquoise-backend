@@ -1,0 +1,188 @@
+---
+interface Props {
+  email: string | null;
+}
+const { email } = Astro.props;
+const current = Astro.url.pathname;
+
+const links = [
+  { href: '/admin', label: 'Dashboard' },
+  { href: '/admin/products/new', label: 'New Product' },
+  { href: '/admin/settings', label: 'Settings' },
+];
+
+function isActive(href: string) {
+  if (href === '/admin') return current === '/admin' || current === '/admin/';
+  return current.startsWith(href);
+}
+---
+
+<aside class="nav">
+  <div class="brand">
+    <div class="brand-title">Tacky Turquoise</div>
+    <div class="brand-sub">Admin</div>
+  </div>
+
+  <nav>
+    <ul>
+      {
+        links.map((l) => (
+          <li>
+            <a href={l.href} class:list={[{ active: isActive(l.href) }]}>
+              {l.label}
+            </a>
+          </li>
+        ))
+      }
+    </ul>
+  </nav>
+
+  <div class="nav-footer">
+    {email && <div class="who">{email}</div>}
+    <form method="post" action="/admin/logout">
+      <button type="submit" class="logout">Logout</button>
+    </form>
+  </div>
+
+  <button id="nav-toggle" type="button" aria-label="Toggle navigation">☰</button>
+</aside>
+
+<script>
+  const toggle = document.getElementById('nav-toggle');
+  const nav = document.querySelector('.nav');
+  toggle?.addEventListener('click', () => {
+    nav?.classList.toggle('open');
+  });
+</script>
+
+<style>
+  .nav {
+    background: #14302e;
+    color: #f1ede4;
+    width: 220px;
+    padding: 1.25rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+  }
+  .brand-title {
+    font-weight: 700;
+    font-size: 1.05rem;
+  }
+  .brand-sub {
+    font-size: 0.78rem;
+    opacity: 0.7;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  nav {
+    flex: 1;
+  }
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  a {
+    display: block;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    color: #f1ede4;
+    text-decoration: none;
+    font-size: 0.95rem;
+  }
+  a:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  a.active {
+    background: rgba(255, 255, 255, 0.14);
+    font-weight: 600;
+  }
+  .nav-footer {
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 0.75rem;
+    font-size: 0.85rem;
+  }
+  .who {
+    opacity: 0.75;
+    margin-bottom: 0.4rem;
+    overflow-wrap: anywhere;
+  }
+  .logout {
+    width: 100%;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    color: #f1ede4;
+    padding: 0.45rem 0.6rem;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .logout:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  form {
+    margin: 0;
+  }
+  #nav-toggle {
+    display: none;
+  }
+
+  @media (max-width: 767px) {
+    .nav {
+      width: 100%;
+      height: auto;
+      position: sticky;
+      padding: 0.75rem 1rem;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .brand {
+      flex: 1;
+    }
+    nav {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #14302e;
+      padding: 0.75rem 1rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      z-index: 10;
+    }
+    .nav.open nav {
+      display: block;
+    }
+    .nav-footer {
+      display: none;
+    }
+    .nav.open .nav-footer {
+      display: block;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      right: 0;
+      background: #14302e;
+      padding: 0.75rem 1rem;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+      margin-top: 8rem;
+      z-index: 10;
+    }
+    #nav-toggle {
+      display: inline-flex;
+      background: transparent;
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #f1ede4;
+      padding: 0.35rem 0.7rem;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+  }
+</style>

@@ -1,0 +1,108 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import SettingsNav from '~/components/admin/SettingsNav.astro';
+
+export const prerender = false;
+
+const sections = [
+  {
+    href: '/admin/settings/users',
+    title: 'Users',
+    description: 'Manage admin accounts. Invite staff, reset passwords, remove access.',
+    ready: true,
+  },
+  {
+    href: null,
+    title: 'Business info',
+    description: 'Contact, tax, and brand details used on receipts and the storefront.',
+    ready: false,
+  },
+  {
+    href: null,
+    title: 'Shipping defaults',
+    description: 'Default origin address, package presets, carrier preferences.',
+    ready: false,
+  },
+  {
+    href: null,
+    title: 'Integrations',
+    description: 'Stripe, email, analytics — wire these up in phase 2.',
+    ready: false,
+  },
+];
+---
+
+<AdminLayout title="Settings">
+  <div class="page-header">
+    <h1>Settings</h1>
+  </div>
+
+  <SettingsNav />
+
+  <div class="grid">
+    {
+      sections.map((s) =>
+        s.ready && s.href ? (
+          <a class="card" href={s.href}>
+            <div class="title">{s.title}</div>
+            <div class="desc muted">{s.description}</div>
+          </a>
+        ) : (
+          <div class="card disabled">
+            <div class="title">
+              {s.title}
+              <span class="coming">Coming soon</span>
+            </div>
+            <div class="desc muted">{s.description}</div>
+          </div>
+        ),
+      )
+    }
+  </div>
+</AdminLayout>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 0.85rem;
+  }
+  .card {
+    display: block;
+    padding: 1rem 1.1rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  a.card:hover {
+    border-color: var(--accent);
+    background: #fbfaf6;
+  }
+  .card.disabled {
+    opacity: 0.65;
+  }
+  .title {
+    font-weight: 600;
+    font-size: 1.02rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .coming {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    background: var(--muted-bg);
+    color: var(--muted);
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    font-weight: 600;
+  }
+  .desc {
+    font-size: 0.9rem;
+    margin-top: 0.25rem;
+  }
+</style>

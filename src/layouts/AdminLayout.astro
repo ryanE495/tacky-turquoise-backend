@@ -1,0 +1,271 @@
+---
+import AdminSidebar from '~/components/admin/AdminSidebar.astro';
+
+interface Props {
+  title: string;
+  hideNav?: boolean;
+}
+
+const { title, hideNav = false } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex,nofollow" />
+    <title>{title} · Admin</title>
+  </head>
+  <body>
+    <div class="shell" data-has-nav={(!hideNav).toString()}>
+      {!hideNav && <AdminSidebar />}
+      <main class="content">
+        <slot />
+      </main>
+    </div>
+
+    <style is:global>
+      :root {
+        --bg: #f7f6f2;
+        --panel: #ffffff;
+        --border: #e2ded4;
+        --text: #1a1a1a;
+        --muted: #6b6b6b;
+        --accent: #1f6f6a;
+        --accent-hover: #175955;
+        --danger: #a23b2d;
+        --danger-hover: #82301f;
+        --green: #2f7d32;
+        --amber: #b77d0b;
+        --gray: #777;
+        --muted-bg: #e7e4dc;
+        --focus: #1f6f6a;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-size: 16px;
+        line-height: 1.5;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: rgba(31, 111, 106, 0.15);
+        overflow-x: hidden;
+      }
+
+      a {
+        color: var(--accent);
+      }
+
+      button,
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.55rem 0.95rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: var(--panel);
+        color: var(--text);
+        font: inherit;
+        cursor: pointer;
+        text-decoration: none;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      button:hover,
+      .btn:hover {
+        background: #f0eee7;
+      }
+      .btn-primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+        border-color: var(--accent-hover);
+      }
+      .btn-danger {
+        background: var(--danger);
+        border-color: var(--danger);
+        color: #fff;
+      }
+      .btn-danger:hover {
+        background: var(--danger-hover);
+        border-color: var(--danger-hover);
+      }
+      button:disabled,
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+
+      input,
+      textarea,
+      select {
+        font: inherit;
+        font-size: 16px; /* prevent iOS Safari zoom-on-focus */
+        width: 100%;
+        padding: 0.55rem 0.7rem;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--text);
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      input[type='checkbox'],
+      input[type='radio'] {
+        width: auto;
+        -webkit-appearance: auto;
+        appearance: auto;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 2px solid var(--focus);
+        outline-offset: 1px;
+        border-color: var(--focus);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-weight: 600;
+        font-size: 0.92rem;
+      }
+
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 0.9rem;
+      }
+      @media (min-width: 640px) {
+        .panel {
+          padding: 1.25rem;
+        }
+      }
+
+      .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-bottom: 1.25rem;
+      }
+      .page-header h1 {
+        margin: 0;
+        font-size: 1.35rem;
+      }
+      @media (min-width: 640px) {
+        .page-header h1 {
+          font-size: 1.5rem;
+        }
+      }
+
+      .muted {
+        color: var(--muted);
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.15rem 0.55rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        text-transform: capitalize;
+        color: #fff;
+      }
+      .badge-draft {
+        background: var(--gray);
+      }
+      .badge-published {
+        background: var(--green);
+      }
+      .badge-sold {
+        background: var(--amber);
+      }
+      .badge-archived {
+        background: var(--muted-bg);
+        color: var(--muted);
+      }
+
+      .shell {
+        display: flex;
+        min-height: 100vh;
+      }
+      .shell[data-has-nav='false'] .content {
+        padding: 1rem;
+      }
+      .content {
+        flex: 1;
+        min-width: 0; /* lets content shrink inside flex parent, prevents overflow */
+        padding: 3.5rem 1rem 1.5rem; /* top padding clears the fixed mobile hamburger */
+        max-width: 100%;
+      }
+
+      @media (min-width: 768px) {
+        .content {
+          padding: 2rem;
+        }
+      }
+
+      .form-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+      @media (min-width: 720px) {
+        .form-grid {
+          grid-template-columns: 1fr 1fr;
+        }
+        .form-grid .full {
+          grid-column: 1 / -1;
+        }
+      }
+
+      .price-input {
+        position: relative;
+      }
+      .price-input::before {
+        content: '$';
+        position: absolute;
+        left: 0.7rem;
+        top: 50%;
+        transform: translateY(-50%);
+        color: var(--muted);
+      }
+      .price-input input {
+        padding-left: 1.4rem;
+      }
+
+      .flash {
+        padding: 0.65rem 0.9rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        font-size: 0.95rem;
+      }
+      .flash-success {
+        background: #e8f5e9;
+        color: #1a4e1c;
+        border: 1px solid #c4e2c6;
+      }
+      .flash-error {
+        background: #fdecea;
+        color: #7a2a20;
+        border: 1px solid #f5c6c0;
+      }
+    </style>
+  </body>
+</html>
