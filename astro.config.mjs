@@ -5,6 +5,6 @@ export default defineConfig({
   output: 'server',
   adapter: netlify(),
   server: {
-    port: 4321,
+    port: 4322,
   },
 });

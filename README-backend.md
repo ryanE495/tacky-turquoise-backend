@@ -34,7 +34,7 @@ npm install
 npm run dev
 ```
 
-Dev server runs at http://localhost:4321. The admin UI is at http://localhost:4321/admin.
+Dev server runs at http://localhost:4322. The admin UI is at http://localhost:4322/admin.
 
 ---
 
@@ -118,8 +118,8 @@ Images seeded by SQL also need a matching file uploaded to the `product-images` 
 ## 7. Verify the public API
 
 ```
-curl http://localhost:4321/api/products
-curl http://localhost:4321/api/products/royston-lightning-cuff
+curl http://localhost:4322/api/products
+curl http://localhost:4322/api/products/royston-lightning-cuff
 ```
 
 Both return `{ "ok": true, "data": … }`. Draft/archived products are never returned. Sold products **are** returned (frontend uses the `status` field to render a "SOLD" overlay).
@@ -147,9 +147,9 @@ The migration creates `profiles`, a trigger that auto-creates a profile row when
 Invite and recovery emails contain a link back to your app. For those links to land correctly:
 
 1. Supabase dashboard → **Authentication → URL Configuration**
-2. **Site URL**: set to your deployed origin (e.g. `https://tackyturquoise.com`). For local-only testing, `http://localhost:4321` works.
+2. **Site URL**: set to your deployed origin (e.g. `https://tackyturquoise.com`). For local-only testing, `http://localhost:4322` works.
 3. **Redirect URLs**: add both:
-   - `http://localhost:4321/admin/set-password`
+   - `http://localhost:4322/admin/set-password`
    - `https://<your-production-domain>/admin/set-password`
 
 Without these, Supabase rejects the `redirectTo` param and the user lands on the Supabase-hosted fallback.

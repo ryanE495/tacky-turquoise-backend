@@ -307,12 +307,17 @@ const costDollars =
 <style>
   form {
     max-width: 100%;
+    min-width: 0;
   }
 
   .product-form-grid {
     display: grid;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 1.25rem;
+  }
+  .fields-col,
+  .image-col {
+    min-width: 0;
   }
   .image-col {
     order: -1;

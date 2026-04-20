@@ -223,12 +223,15 @@ const { title, hideNav = false } = Astro.props;
 
       .form-grid {
         display: grid;
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 1rem;
+      }
+      .form-grid > * {
+        min-width: 0;
       }
       @media (min-width: 720px) {
         .form-grid {
-          grid-template-columns: 1fr 1fr;
+          grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
         }
         .form-grid .full {
           grid-column: 1 / -1;
