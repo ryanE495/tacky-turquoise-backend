@@ -1,0 +1,266 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { publicImageUrl } from '~/lib/images';
+import { formatPrice } from '~/lib/format';
+
+export const prerender = false;
+
+const id = Astro.params.id;
+if (!id) return Astro.redirect('/admin/orders');
+
+const supabase = createSupabaseAdminClient();
+const { data: order } = await supabase.from('orders').select('*').eq('id', id).maybeSingle();
+
+if (!order) return Astro.redirect('/admin/orders');
+
+const { data: items } = await supabase
+  .from('order_items')
+  .select('*')
+  .eq('order_id', id)
+  .order('created_at', { ascending: true });
+
+function formatDate(iso: string | null | undefined) {
+  if (!iso) return '—';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+---
+
+<AdminLayout title={`Order ${order.order_number}`}>
+  <div class="page-header">
+    <div>
+      <h1>{order.order_number}</h1>
+      <div class="muted">
+        Placed {formatDate(order.created_at)} · {' '}
+        <span class={`status-pill status-${order.status}`}>{order.status}</span>
+      </div>
+    </div>
+    <a class="btn" href="/admin/orders">Back</a>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <h2>Items</h2>
+      <ul class="items">
+        {
+          (items ?? []).map((it) => (
+            <li class="item">
+              <div class="thumb">
+                {it.primary_image_path ? (
+                  <img src={publicImageUrl(supabase, it.primary_image_path)} alt={it.product_title} />
+                ) : (
+                  <div class="thumb-empty muted">no image</div>
+                )}
+              </div>
+              <div class="meta">
+                <div class="title">{it.product_title}</div>
+                <div class="muted piece-id">{it.product_piece_id}</div>
+                <a class="slug muted" href={`/admin/products/${it.product_id}/edit`}>
+                  /{it.product_slug}
+                </a>
+              </div>
+              <div class="price">{formatPrice(it.price_cents)}</div>
+            </li>
+          ))
+        }
+      </ul>
+
+      <div class="totals">
+        <div class="row"><span>Subtotal</span><span class="amount">{formatPrice(order.subtotal_cents)}</span></div>
+        <div class="row"><span>Shipping</span><span class="amount">{formatPrice(order.shipping_cents)}</span></div>
+        <div class="row"><span>Tax</span><span class="amount">{formatPrice(order.tax_cents)}</span></div>
+        <div class="row total"><span>Total</span><span class="amount">{formatPrice(order.total_cents)}</span></div>
+      </div>
+    </section>
+
+    <aside class="side">
+      <section class="panel">
+        <h2>Customer</h2>
+        <div><strong>{order.customer_name}</strong></div>
+        <div class="muted">{order.customer_email}</div>
+        {order.customer_phone && <div class="muted">{order.customer_phone}</div>}
+      </section>
+
+      <section class="panel">
+        <h2>Shipping</h2>
+        <div>{order.ship_to_name}</div>
+        <div>{order.ship_to_line1}</div>
+        {order.ship_to_line2 && <div>{order.ship_to_line2}</div>}
+        <div>{order.ship_to_city}, {order.ship_to_state} {order.ship_to_postal_code}</div>
+        <div>{order.ship_to_country}</div>
+      </section>
+
+      <section class="panel">
+        <h2>Timeline</h2>
+        <dl>
+          <dt>Placed</dt><dd>{formatDate(order.created_at)}</dd>
+          <dt>Paid</dt><dd>{formatDate(order.paid_at)}</dd>
+          <dt>Shipped</dt><dd>{formatDate(order.shipped_at)}</dd>
+          <dt>Delivered</dt><dd>{formatDate(order.delivered_at)}</dd>
+        </dl>
+      </section>
+
+      {
+        order.customer_notes && (
+          <section class="panel">
+            <h2>Customer notes</h2>
+            <p class="notes">{order.customer_notes}</p>
+          </section>
+        )
+      }
+    </aside>
+  </div>
+</AdminLayout>
+
+<style>
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .grid {
+      grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+      gap: 1.25rem;
+    }
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+  }
+
+  .items {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .item {
+    display: grid;
+    grid-template-columns: 56px 1fr auto;
+    gap: 0.75rem;
+    align-items: center;
+    padding: 0.6rem;
+    background: #fbfaf6;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  .thumb {
+    width: 56px;
+    height: 56px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--muted-bg);
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .thumb-empty {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+  }
+  .meta .title {
+    font-weight: 500;
+    font-size: 0.95rem;
+  }
+  .piece-id {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .slug {
+    display: inline-block;
+    font-size: 0.8rem;
+    margin-top: 0.1rem;
+    color: var(--muted);
+    text-decoration: none;
+  }
+  .slug:hover {
+    color: var(--accent);
+  }
+  .price {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+
+  .totals {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+    max-width: 280px;
+    margin-left: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+  }
+  .totals .row {
+    display: flex;
+    justify-content: space-between;
+  }
+  .totals .row.total {
+    font-weight: 700;
+    border-top: 1px solid var(--border);
+    padding-top: 0.4rem;
+  }
+  .amount {
+    font-variant-numeric: tabular-nums;
+  }
+
+  dl {
+    margin: 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    column-gap: 1rem;
+    row-gap: 0.35rem;
+    font-size: 0.9rem;
+  }
+  dt {
+    color: var(--muted);
+    font-weight: 500;
+  }
+  dd {
+    margin: 0;
+  }
+
+  .notes {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: 0.92rem;
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    color: #fff;
+  }
+  .status-pending { background: var(--amber); }
+  .status-paid { background: var(--green); }
+  .status-shipped { background: #4a6fa5; }
+  .status-delivered { background: var(--accent); }
+  .status-refunded { background: var(--muted); }
+  .status-cancelled { background: var(--gray); }
+  .status-failed { background: var(--danger); }
+</style>

@@ -1,0 +1,290 @@
+---
+import SiteLayout from '~/layouts/SiteLayout.astro';
+
+export const prerender = false;
+---
+
+<SiteLayout title="Order confirmed · Tacky Turquoise">
+  <div class="wrap">
+    <div id="loading" class="muted loading">Confirming your order…</div>
+
+    <div id="not-found" class="panel" hidden>
+      <h1>Order not found</h1>
+      <p class="muted">We couldn't find that order. Try reloading, or head back to the shop.</p>
+      <a class="btn btn-primary" href="/shop">Back to shop</a>
+    </div>
+
+    <div id="confirmed" class="panel" hidden>
+      <div class="check" aria-hidden="true">✓</div>
+      <h1 id="thank-you">Thank you.</h1>
+      <p class="muted" id="order-line"></p>
+
+      <ul class="items" id="items"></ul>
+
+      <div class="totals">
+        <div class="row">
+          <span>Subtotal</span>
+          <span class="amount" id="subtotal">—</span>
+        </div>
+        <div class="row">
+          <span>Shipping</span>
+          <span class="amount" id="shipping">—</span>
+        </div>
+        <div class="row total">
+          <span>Total</span>
+          <span class="amount" id="total">—</span>
+        </div>
+      </div>
+
+      <div class="ship-to">
+        <div class="label muted">Shipping to</div>
+        <div id="ship-to"></div>
+      </div>
+
+      <p class="email-note muted" id="email-note"></p>
+
+      <a class="btn" href="/shop">Continue shopping</a>
+    </div>
+  </div>
+</SiteLayout>
+
+<script>
+  import { clearCart } from '~/lib/cart';
+  import { formatPrice } from '~/lib/format';
+
+  const params = new URLSearchParams(window.location.search);
+  const orderNumber = params.get('order')?.trim() || '';
+
+  const loading = document.getElementById('loading') as HTMLElement;
+  const notFound = document.getElementById('not-found') as HTMLElement;
+  const confirmed = document.getElementById('confirmed') as HTMLElement;
+  const thankYou = document.getElementById('thank-you') as HTMLElement;
+  const orderLine = document.getElementById('order-line') as HTMLElement;
+  const itemsEl = document.getElementById('items') as HTMLUListElement;
+  const subtotalEl = document.getElementById('subtotal') as HTMLElement;
+  const shippingEl = document.getElementById('shipping') as HTMLElement;
+  const totalEl = document.getElementById('total') as HTMLElement;
+  const shipToEl = document.getElementById('ship-to') as HTMLElement;
+  const emailNote = document.getElementById('email-note') as HTMLElement;
+
+  function escapeHtml(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  async function init() {
+    if (!orderNumber) {
+      loading.hidden = true;
+      notFound.hidden = false;
+      return;
+    }
+
+    // TODO(stripe): Remove this stub call. Production payment confirmation
+    // comes from Stripe's checkout.session.completed webhook, not the client.
+    await fetch(`/api/orders/${encodeURIComponent(orderNumber)}/mark-paid-stub`, {
+      method: 'POST',
+    }).catch(() => undefined);
+
+    const res = await fetch(
+      `/api/orders/by-number?order=${encodeURIComponent(orderNumber)}`,
+    ).catch(() => null);
+
+    if (!res) {
+      loading.hidden = true;
+      notFound.hidden = false;
+      return;
+    }
+    const json = await res.json();
+    if (!json.ok) {
+      loading.hidden = true;
+      notFound.hidden = false;
+      return;
+    }
+
+    const o = json.data as {
+      order_number: string;
+      customer_name: string;
+      customer_email: string;
+      items: Array<{ title: string; piece_id: string; price_cents: number; primary_image_url: string | null }>;
+      ship_to: {
+        name: string;
+        line1: string;
+        line2: string | null;
+        city: string;
+        state: string;
+        postal_code: string;
+        country: string;
+      };
+      subtotal_cents: number;
+      shipping_cents: number;
+      total_cents: number;
+    };
+
+    const firstName = o.customer_name.split(/\s+/)[0] || 'there';
+    thankYou.textContent = `Thank you, ${firstName}.`;
+    orderLine.textContent = `Your order ${o.order_number} has been received.`;
+
+    itemsEl.innerHTML = o.items
+      .map(
+        (it) => `
+        <li class="item">
+          <div class="thumb">${
+            it.primary_image_url
+              ? `<img src="${escapeHtml(it.primary_image_url)}" alt="${escapeHtml(it.title)}" />`
+              : ''
+          }</div>
+          <div class="meta">
+            <div class="title">${escapeHtml(it.title)}</div>
+            <div class="muted piece-id">${escapeHtml(it.piece_id)}</div>
+          </div>
+          <div class="price">${formatPrice(it.price_cents)}</div>
+        </li>
+      `,
+      )
+      .join('');
+
+    subtotalEl.textContent = formatPrice(o.subtotal_cents);
+    shippingEl.textContent = formatPrice(o.shipping_cents);
+    totalEl.textContent = formatPrice(o.total_cents);
+
+    const lines = [
+      o.ship_to.name,
+      o.ship_to.line1,
+      o.ship_to.line2,
+      `${o.ship_to.city}, ${o.ship_to.state} ${o.ship_to.postal_code}`,
+      o.ship_to.country,
+    ].filter(Boolean);
+    shipToEl.innerHTML = lines.map((l) => escapeHtml(l as string)).join('<br>');
+
+    emailNote.textContent = `We'll email you at ${o.customer_email} when it ships.`;
+
+    loading.hidden = true;
+    confirmed.hidden = false;
+
+    clearCart();
+  }
+
+  init();
+</script>
+
+<style>
+  .wrap {
+    max-width: 640px;
+    margin: 0 auto;
+  }
+  .loading {
+    text-align: center;
+    padding: 3rem 0;
+  }
+  .panel {
+    background: var(--site-panel);
+    border: 1px solid var(--site-border);
+    border-radius: 12px;
+    padding: 1.75rem 1.5rem;
+    text-align: center;
+  }
+  .check {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    background: var(--site-accent);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 1.3rem;
+    margin-bottom: 0.75rem;
+  }
+  h1 {
+    margin: 0 0 0.35rem;
+    font-size: 1.5rem;
+  }
+  .items {
+    list-style: none;
+    padding: 0;
+    margin: 1.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    text-align: left;
+  }
+  .item {
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    gap: 0.65rem;
+    align-items: center;
+    padding: 0.55rem;
+    background: #fbfaf6;
+    border: 1px solid var(--site-border);
+    border-radius: 8px;
+  }
+  .thumb {
+    width: 52px;
+    height: 52px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--site-muted-bg);
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .meta .title {
+    font-size: 0.92rem;
+    font-weight: 500;
+  }
+  .piece-id {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .price {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    font-size: 0.92rem;
+  }
+  .totals {
+    border-top: 1px solid var(--site-border);
+    padding-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    text-align: left;
+    max-width: 280px;
+    margin-left: auto;
+  }
+  .totals .row {
+    display: flex;
+    justify-content: space-between;
+  }
+  .totals .row.total {
+    font-weight: 700;
+    font-size: 1.05rem;
+    border-top: 1px solid var(--site-border);
+    padding-top: 0.4rem;
+    margin-top: 0.2rem;
+  }
+  .amount {
+    font-variant-numeric: tabular-nums;
+  }
+  .ship-to {
+    text-align: left;
+    margin: 1.25rem 0 0.75rem;
+  }
+  .ship-to .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .email-note {
+    font-size: 0.92rem;
+    margin: 0.75rem 0 1.5rem;
+  }
+</style>

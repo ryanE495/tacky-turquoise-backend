@@ -1,0 +1,76 @@
+---
+// Header cart icon with live count. Hydrates client-side.
+---
+
+<a class="cart-link" href="/cart" aria-label="Cart">
+  <svg
+    width="22"
+    height="22"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+  >
+    <path d="M3 5h2l2.5 11.2a2 2 0 0 0 2 1.6h8.6a2 2 0 0 0 2-1.5L22 8H6" />
+    <circle cx="10" cy="20.5" r="1.2" />
+    <circle cx="18" cy="20.5" r="1.2" />
+  </svg>
+  <span class="badge" id="cart-badge" data-count="0" hidden>0</span>
+</a>
+
+<script>
+  import { getCartCount, subscribeToCart } from '~/lib/cart';
+
+  const badge = document.getElementById('cart-badge') as HTMLElement;
+
+  function render(count: number) {
+    if (count > 0) {
+      badge.textContent = String(count);
+      badge.dataset.count = String(count);
+      badge.hidden = false;
+    } else {
+      badge.hidden = true;
+      badge.dataset.count = '0';
+    }
+  }
+
+  render(getCartCount());
+  subscribeToCart((cart) => render(cart.items.length));
+</script>
+
+<style>
+  .cart-link {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    color: inherit;
+    text-decoration: none;
+    border-radius: 50%;
+    transition: background 0.15s;
+  }
+  .cart-link:hover {
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .badge {
+    position: absolute;
+    top: 2px;
+    right: 0;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--site-accent, #1f6f6a);
+    color: #fff;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+  }
+</style>

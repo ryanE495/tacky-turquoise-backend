@@ -1,0 +1,451 @@
+---
+import SiteLayout from '~/layouts/SiteLayout.astro';
+import UnavailableItemsBanner from '~/components/UnavailableItemsBanner.astro';
+import { US_STATES, FLAT_SHIPPING_CENTS } from '~/lib/orders';
+
+export const prerender = false;
+---
+
+<SiteLayout title="Checkout · Tacky Turquoise">
+  <h1>Checkout</h1>
+
+  <UnavailableItemsBanner />
+
+  <div id="checkout-loading" class="loading muted">Loading…</div>
+  <div id="checkout-error" class="flash flash-error" hidden></div>
+
+  <div class="checkout-grid" id="checkout-body" hidden>
+    <section class="form-col">
+      <form id="checkout-form" novalidate>
+        <fieldset>
+          <legend>Contact</legend>
+          <div class="grid-2">
+            <div class="field full">
+              <label for="email">Email *</label>
+              <input id="email" name="email" type="email" required autocomplete="email" />
+            </div>
+            <div class="field full">
+              <label for="name">Full name *</label>
+              <input id="name" name="name" type="text" required autocomplete="name" />
+            </div>
+            <div class="field full">
+              <label for="phone">Phone <span class="muted">(optional)</span></label>
+              <input id="phone" name="phone" type="tel" autocomplete="tel" />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Shipping address</legend>
+          <div class="grid-2">
+            <div class="field full">
+              <label for="line1">Address line 1 *</label>
+              <input id="line1" name="line1" type="text" required autocomplete="address-line1" />
+            </div>
+            <div class="field full">
+              <label for="line2">Address line 2 <span class="muted">(optional)</span></label>
+              <input id="line2" name="line2" type="text" autocomplete="address-line2" />
+            </div>
+            <div class="field">
+              <label for="city">City *</label>
+              <input id="city" name="city" type="text" required autocomplete="address-level2" />
+            </div>
+            <div class="field">
+              <label for="state">State *</label>
+              <select id="state" name="state" required autocomplete="address-level1">
+                <option value="">Select…</option>
+                {US_STATES.map((s) => <option value={s.value}>{s.label}</option>)}
+              </select>
+            </div>
+            <div class="field">
+              <label for="postal_code">ZIP *</label>
+              <input
+                id="postal_code"
+                name="postal_code"
+                type="text"
+                required
+                inputmode="numeric"
+                autocomplete="postal-code"
+                pattern="\d{5}(-\d{4})?"
+              />
+            </div>
+            <div class="field">
+              <label for="country">Country</label>
+              <input id="country" name="country" type="text" value="United States" disabled />
+              <div class="hint muted">US shipping only for now.</div>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend>Order notes <span class="muted">(optional)</span></legend>
+          <textarea id="customer_notes" name="customer_notes" rows="3"></textarea>
+        </fieldset>
+      </form>
+    </section>
+
+    <aside class="summary-col">
+      <div class="summary">
+        <h2>Order summary</h2>
+        <ul class="items" id="summary-items"></ul>
+        <div class="totals">
+          <div class="row">
+            <span>Subtotal</span>
+            <span class="amount" id="subtotal">—</span>
+          </div>
+          <div class="row">
+            <span>Shipping</span>
+            <span class="amount" id="shipping">—</span>
+          </div>
+          <div class="row muted">
+            <span>Tax</span>
+            <span>Calculated at payment</span>
+          </div>
+          <div class="row total">
+            <span>Estimated total</span>
+            <span class="amount" id="total">—</span>
+          </div>
+        </div>
+        <button type="button" id="complete-btn" class="btn btn-primary complete-btn">
+          Complete order
+        </button>
+        <div class="redirect-note muted">You'll be redirected to secure payment.</div>
+      </div>
+    </aside>
+  </div>
+</SiteLayout>
+
+<script define:vars={{ SHIPPING_CENTS: FLAT_SHIPPING_CENTS }}>
+  window.__CHECKOUT_SHIPPING__ = SHIPPING_CENTS;
+</script>
+
+<script>
+  import { getCart, removeManyFromCart } from '~/lib/cart';
+  import { formatPrice } from '~/lib/format';
+
+  type Available = {
+    id: string;
+    slug: string;
+    piece_id: string;
+    title: string;
+    price_cents: number;
+    length: string | null;
+    primary_image_url: string | null;
+  };
+  type Unavailable = {
+    id: string;
+    reason: 'sold' | 'archived' | 'draft' | 'not_found';
+    title?: string;
+    slug?: string;
+  };
+
+  const SHIPPING_CENTS: number = (window as any).__CHECKOUT_SHIPPING__ ?? 800;
+
+  const loading = document.getElementById('checkout-loading') as HTMLElement;
+  const errorEl = document.getElementById('checkout-error') as HTMLElement;
+  const body = document.getElementById('checkout-body') as HTMLElement;
+  const itemsEl = document.getElementById('summary-items') as HTMLUListElement;
+  const subtotalEl = document.getElementById('subtotal') as HTMLElement;
+  const shippingEl = document.getElementById('shipping') as HTMLElement;
+  const totalEl = document.getElementById('total') as HTMLElement;
+  const form = document.getElementById('checkout-form') as HTMLFormElement;
+  const completeBtn = document.getElementById('complete-btn') as HTMLButtonElement;
+
+  let currentCartIds: string[] = [];
+
+  function escapeAttr(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function renderSummary(available: Available[]) {
+    itemsEl.innerHTML = available
+      .map(
+        (p) => `
+      <li class="item">
+        <div class="thumb">
+          ${p.primary_image_url ? `<img src="${escapeAttr(p.primary_image_url)}" alt="${escapeAttr(p.title)}" />` : ''}
+        </div>
+        <div class="meta">
+          <div class="title">${escapeAttr(p.title)}</div>
+          <div class="muted piece-id">${escapeAttr(p.piece_id)}</div>
+        </div>
+        <div class="price">${formatPrice(p.price_cents)}</div>
+      </li>
+    `,
+      )
+      .join('');
+
+    const subtotal = available.reduce((sum, p) => sum + p.price_cents, 0);
+    const total = subtotal + SHIPPING_CENTS;
+    subtotalEl.textContent = formatPrice(subtotal);
+    shippingEl.textContent = formatPrice(SHIPPING_CENTS);
+    totalEl.textContent = formatPrice(total);
+  }
+
+  function showError(msg: string) {
+    errorEl.hidden = false;
+    errorEl.textContent = msg;
+  }
+
+  async function bootstrap() {
+    const cart = getCart();
+    if (cart.items.length === 0) {
+      window.location.href = '/shop';
+      return;
+    }
+
+    const res = await fetch('/api/cart/validate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ product_ids: cart.items.map((i) => i.product_id) }),
+    });
+    const json = await res.json();
+    if (!json.ok) {
+      loading.hidden = true;
+      showError(json.error || "We couldn't load your cart.");
+      return;
+    }
+    const available: Available[] = json.data.available;
+    const unavailable: Unavailable[] = json.data.unavailable;
+
+    if (unavailable.length > 0) {
+      removeManyFromCart(unavailable.map((u) => u.id));
+      // Redirect back to cart; banner there explains what happened.
+      window.location.href = '/cart?unavailable=1';
+      return;
+    }
+    if (available.length === 0) {
+      window.location.href = '/shop';
+      return;
+    }
+
+    currentCartIds = available.map((p) => p.id);
+    loading.hidden = true;
+    body.hidden = false;
+    renderSummary(available);
+  }
+
+  function collectForm() {
+    const fd = new FormData(form);
+    return {
+      customer: {
+        email: String(fd.get('email') ?? '').trim(),
+        name: String(fd.get('name') ?? '').trim(),
+        phone: String(fd.get('phone') ?? '').trim() || null,
+      },
+      shipping_address: {
+        line1: String(fd.get('line1') ?? '').trim(),
+        line2: String(fd.get('line2') ?? '').trim() || null,
+        city: String(fd.get('city') ?? '').trim(),
+        state: String(fd.get('state') ?? '').trim(),
+        postal_code: String(fd.get('postal_code') ?? '').trim(),
+        country: 'US',
+      },
+      customer_notes: String(fd.get('customer_notes') ?? '').trim() || null,
+    };
+  }
+
+  function validateForm(payload: ReturnType<typeof collectForm>): string | null {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.customer.email)) return 'Valid email is required.';
+    if (!payload.customer.name) return 'Name is required.';
+    if (!payload.shipping_address.line1) return 'Address is required.';
+    if (!payload.shipping_address.city) return 'City is required.';
+    if (!payload.shipping_address.state) return 'State is required.';
+    if (!/^\d{5}(-\d{4})?$/.test(payload.shipping_address.postal_code)) return 'Valid ZIP is required.';
+    return null;
+  }
+
+  completeBtn.addEventListener('click', async () => {
+    errorEl.hidden = true;
+    const payload = collectForm();
+    const valErr = validateForm(payload);
+    if (valErr) {
+      showError(valErr);
+      return;
+    }
+
+    completeBtn.disabled = true;
+    completeBtn.textContent = 'Processing…';
+
+    const res = await fetch('/api/checkout/create', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        product_ids: currentCartIds,
+        ...payload,
+      }),
+    });
+
+    const json = await res.json();
+
+    if (!json.ok) {
+      if (json.error?.code === 'items_unavailable') {
+        const slugs: string[] = (json.error.unavailable ?? [])
+          .map((u: Unavailable) => u.slug)
+          .filter(Boolean);
+        removeManyFromCart((json.error.unavailable ?? []).map((u: Unavailable) => u.id));
+        window.location.href = `/order/failed?reason=sold_out&items=${encodeURIComponent(slugs.join(','))}`;
+        return;
+      }
+      showError(typeof json.error === 'string' ? json.error : 'Checkout failed.');
+      completeBtn.disabled = false;
+      completeBtn.textContent = 'Complete order';
+      return;
+    }
+
+    window.location.href = json.data.redirect_to;
+  });
+
+  bootstrap();
+</script>
+
+<style>
+  h1 {
+    margin: 0 0 1rem;
+    font-size: 1.6rem;
+  }
+  .loading {
+    padding: 2rem 0;
+    text-align: center;
+  }
+  .checkout-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.5rem;
+    align-items: start;
+  }
+  @media (min-width: 900px) {
+    .checkout-grid {
+      grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+      gap: 2.5rem;
+    }
+    .summary-col {
+      position: sticky;
+      top: 5rem;
+    }
+  }
+
+  fieldset {
+    border: 1px solid var(--site-border);
+    border-radius: 8px;
+    padding: 1rem 1.1rem 1.25rem;
+    margin: 0 0 1rem;
+    background: var(--site-panel);
+  }
+  legend {
+    padding: 0 0.4rem;
+    font-weight: 600;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .grid-2 .full {
+    grid-column: 1 / -1;
+  }
+  @media (max-width: 520px) {
+    .grid-2 {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  .field {
+    min-width: 0;
+  }
+  .hint {
+    font-size: 0.82rem;
+    margin-top: 0.3rem;
+  }
+
+  .summary {
+    background: var(--site-panel);
+    border: 1px solid var(--site-border);
+    border-radius: 10px;
+    padding: 1.1rem 1.15rem 1.25rem;
+  }
+  .summary h2 {
+    margin: 0 0 0.8rem;
+    font-size: 1.1rem;
+  }
+  .items {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.9rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .item {
+    display: grid;
+    grid-template-columns: 52px 1fr auto;
+    gap: 0.6rem;
+    align-items: center;
+  }
+  .item .thumb {
+    width: 52px;
+    height: 52px;
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--site-muted-bg);
+  }
+  .item .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .item .title {
+    font-size: 0.92rem;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .item .piece-id {
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .item .price {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    font-size: 0.92rem;
+  }
+
+  .totals {
+    border-top: 1px solid var(--site-border);
+    padding-top: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+  }
+  .totals .row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.95rem;
+  }
+  .totals .row.total {
+    font-weight: 700;
+    font-size: 1.05rem;
+    border-top: 1px solid var(--site-border);
+    padding-top: 0.5rem;
+    margin-top: 0.25rem;
+  }
+  .amount {
+    font-variant-numeric: tabular-nums;
+  }
+  .complete-btn {
+    width: 100%;
+    padding: 0.9rem;
+    font-size: 1rem;
+    font-weight: 600;
+  }
+  .redirect-note {
+    font-size: 0.8rem;
+    text-align: center;
+    margin-top: 0.55rem;
+  }
+</style>

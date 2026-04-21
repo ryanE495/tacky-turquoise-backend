@@ -1,0 +1,224 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { formatPrice } from '~/lib/format';
+
+export const prerender = false;
+
+type OrderStatus =
+  | 'pending'
+  | 'paid'
+  | 'shipped'
+  | 'delivered'
+  | 'refunded'
+  | 'cancelled'
+  | 'failed';
+
+const STATUS_TABS: Array<{ value: 'all' | OrderStatus; label: string }> = [
+  { value: 'all', label: 'All' },
+  { value: 'pending', label: 'Pending' },
+  { value: 'paid', label: 'Paid' },
+  { value: 'shipped', label: 'Shipped' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'refunded', label: 'Refunded' },
+  { value: 'cancelled', label: 'Cancelled' },
+  { value: 'failed', label: 'Failed' },
+];
+
+const statusParam = Astro.url.searchParams.get('status') ?? 'all';
+
+const supabase = createSupabaseAdminClient();
+let query = supabase
+  .from('orders')
+  .select(
+    'id, order_number, status, customer_name, customer_email, total_cents, created_at, order_items(id)',
+  )
+  .order('created_at', { ascending: false });
+
+if (statusParam !== 'all') {
+  query = query.eq('status', statusParam);
+}
+
+const { data: rows, error } = await query;
+
+function formatDate(iso: string) {
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+---
+
+<AdminLayout title="Orders">
+  <div class="page-header">
+    <h1>Orders</h1>
+  </div>
+
+  {error && <div class="flash flash-error">{error.message}</div>}
+
+  <div class="tabs">
+    {
+      STATUS_TABS.map((t) => {
+        const params = new URLSearchParams();
+        if (t.value !== 'all') params.set('status', t.value);
+        const href = `/admin/orders${params.toString() ? `?${params.toString()}` : ''}`;
+        const active = statusParam === t.value;
+        return (
+          <a href={href} class:list={['tab', { active }]}>
+            {t.label}
+          </a>
+        );
+      })
+    }
+  </div>
+
+  {
+    !rows || rows.length === 0 ? (
+      <div class="empty panel">No orders yet.</div>
+    ) : (
+      <div class="list">
+        {rows.map((o) => (
+          <a class="row" href={`/admin/orders/${o.id}`}>
+            <div class="num">{o.order_number}</div>
+            <div class="who">
+              <div class="name">{o.customer_name}</div>
+              <div class="muted email">{o.customer_email}</div>
+            </div>
+            <div class="count muted">
+              {o.order_items?.length ?? 0} item{(o.order_items?.length ?? 0) === 1 ? '' : 's'}
+            </div>
+            <div class="total">{formatPrice(o.total_cents)}</div>
+            <div class="status">
+              <span class={`status-pill status-${o.status}`}>{o.status}</span>
+            </div>
+            <div class="muted date">{formatDate(o.created_at)}</div>
+          </a>
+        ))}
+      </div>
+    )
+  }
+</AdminLayout>
+
+<style>
+  .tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+  }
+  .tab {
+    padding: 0.4rem 0.85rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    font-size: 0.9rem;
+    text-decoration: none;
+    color: var(--text);
+  }
+  .tab:hover {
+    background: #f0eee7;
+  }
+  .tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+  .empty {
+    text-align: center;
+    color: var(--muted);
+    padding: 2rem;
+  }
+  .list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  .row {
+    display: grid;
+    grid-template-columns: 100px minmax(0, 1.6fr) 90px 100px auto 150px;
+    gap: 0.9rem;
+    align-items: center;
+    padding: 0.75rem 0.9rem;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .row:hover {
+    border-color: var(--accent);
+    background: #fbfaf6;
+  }
+  .num {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .who {
+    min-width: 0;
+  }
+  .name {
+    font-weight: 500;
+  }
+  .email {
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .count {
+    font-size: 0.88rem;
+  }
+  .total {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+  }
+  .date {
+    font-size: 0.82rem;
+    text-align: right;
+  }
+  .status-pill {
+    display: inline-block;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    color: #fff;
+  }
+  .status-pending { background: var(--amber); }
+  .status-paid { background: var(--green); }
+  .status-shipped { background: #4a6fa5; }
+  .status-delivered { background: var(--accent); }
+  .status-refunded { background: var(--muted); }
+  .status-cancelled { background: var(--gray); }
+  .status-failed { background: var(--danger); }
+
+  @media (max-width: 900px) {
+    .row {
+      grid-template-columns: 1fr auto;
+      row-gap: 0.35rem;
+    }
+    .num {
+      grid-column: 1;
+    }
+    .status {
+      grid-column: 2;
+      grid-row: 1;
+      justify-self: end;
+    }
+    .who,
+    .count,
+    .total,
+    .date {
+      grid-column: 1 / -1;
+    }
+    .total {
+      font-size: 0.95rem;
+    }
+    .date {
+      text-align: left;
+    }
+  }
+</style>

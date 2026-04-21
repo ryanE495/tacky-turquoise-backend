@@ -1,0 +1,233 @@
+---
+import CartBadge from '~/components/CartBadge.astro';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    {description && <meta name="description" content={description} />}
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <a class="brand" href="/shop">Tacky Turquoise</a>
+        <nav class="site-nav">
+          <a href="/shop">Shop</a>
+        </nav>
+        <div class="site-actions">
+          <CartBadge />
+        </div>
+      </div>
+    </header>
+
+    <main class="site-main">
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer-inner muted">
+        One-of-a-kind beaded turquoise necklaces. © {new Date().getFullYear()} Tacky Turquoise.
+      </div>
+    </footer>
+
+    <style is:global>
+      :root {
+        --site-bg: #f7f6f2;
+        --site-panel: #ffffff;
+        --site-border: #e2ded4;
+        --site-text: #1a1a1a;
+        --site-muted: #6b6b6b;
+        --site-accent: #1f6f6a;
+        --site-accent-hover: #175955;
+        --site-danger: #a23b2d;
+        --site-muted-bg: #e7e4dc;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--site-bg);
+        color: var(--site-text);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        font-size: 16px;
+        line-height: 1.55;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: rgba(31, 111, 106, 0.15);
+        overflow-x: hidden;
+      }
+      a {
+        color: var(--site-accent);
+      }
+      img {
+        max-width: 100%;
+        display: block;
+      }
+      input,
+      textarea,
+      select {
+        font: inherit;
+        font-size: 16px;
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        border: 1px solid var(--site-border);
+        border-radius: 6px;
+        background: #fff;
+        color: var(--site-text);
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      input[type='checkbox'],
+      input[type='radio'] {
+        width: auto;
+        -webkit-appearance: auto;
+        appearance: auto;
+      }
+      input:focus,
+      textarea:focus,
+      select:focus {
+        outline: 2px solid var(--site-accent);
+        outline-offset: 1px;
+        border-color: var(--site-accent);
+      }
+      label {
+        display: block;
+        margin-bottom: 0.3rem;
+        font-weight: 600;
+        font-size: 0.92rem;
+      }
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.4rem;
+        padding: 0.7rem 1.1rem;
+        background: var(--site-panel);
+        border: 1px solid var(--site-border);
+        border-radius: 6px;
+        color: var(--site-text);
+        text-decoration: none;
+        font: inherit;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .btn:hover {
+        background: #f0eee7;
+      }
+      .btn-primary {
+        background: var(--site-accent);
+        border-color: var(--site-accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--site-accent-hover);
+        border-color: var(--site-accent-hover);
+      }
+      .btn:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .muted {
+        color: var(--site-muted);
+      }
+      .site-header {
+        background: var(--site-panel);
+        border-bottom: 1px solid var(--site-border);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+      }
+      .site-header-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        padding: 0.6rem 1rem;
+      }
+      .brand {
+        font-weight: 700;
+        font-size: 1.05rem;
+        color: var(--site-text);
+        text-decoration: none;
+      }
+      .site-nav {
+        flex: 1;
+        display: flex;
+        gap: 1rem;
+      }
+      .site-nav a {
+        color: var(--site-text);
+        text-decoration: none;
+        font-weight: 500;
+        padding: 0.35rem 0.5rem;
+      }
+      .site-nav a:hover {
+        color: var(--site-accent);
+      }
+      .site-actions {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .site-main {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+      }
+      @media (min-width: 768px) {
+        .site-main {
+          padding: 2rem 1.25rem 4rem;
+        }
+      }
+
+      .site-footer {
+        border-top: 1px solid var(--site-border);
+        background: var(--site-panel);
+        margin-top: 3rem;
+      }
+      .site-footer-inner {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 1.25rem 1rem;
+        font-size: 0.88rem;
+        text-align: center;
+      }
+
+      .flash {
+        padding: 0.65rem 0.9rem;
+        border-radius: 6px;
+        margin-bottom: 1rem;
+        font-size: 0.95rem;
+      }
+      .flash-success {
+        background: #e8f5e9;
+        color: #1a4e1c;
+        border: 1px solid #c4e2c6;
+      }
+      .flash-error {
+        background: #fdecea;
+        color: #7a2a20;
+        border: 1px solid #f5c6c0;
+      }
+      .flash-warn {
+        background: #fff8e1;
+        color: #5a4400;
+        border: 1px solid #f2d37b;
+      }
+    </style>
+  </body>
+</html>
