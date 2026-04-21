@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const MEDIA_BUCKET = 'media';
-export const MEDIA_MAX_BYTES = 10 * 1024 * 1024;
+export const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
 
 export interface MediaItem {
   name: string;

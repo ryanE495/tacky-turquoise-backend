@@ -36,7 +36,7 @@ const initialJson = JSON.stringify(items);
     <input type="file" id="media-input" accept="image/*" multiple hidden />
     <div class="dropzone-inner">
       <strong>Drop files here</strong>
-      <span class="muted">or click to choose · images only · 10MB max each</span>
+      <span class="muted">or click to choose · images only · 50MB max each</span>
     </div>
   </div>
 
@@ -87,7 +87,7 @@ const initialJson = JSON.stringify(items);
     url: string;
   };
 
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 50 * 1024 * 1024;
 
   const grid = document.getElementById('media-grid') as HTMLElement;
   const dropzone = document.getElementById('media-dropzone') as HTMLElement;
@@ -163,20 +163,61 @@ const initialJson = JSON.stringify(items);
       return;
     }
     if (file.size > MAX_BYTES) {
-      showFlash('error', `${file.name}: exceeds 10MB`);
+      showFlash('error', `${file.name}: exceeds 50MB`);
       return;
     }
-    const fd = new FormData();
-    fd.append('file', file);
-    const res = await fetch('/api/admin/media', { method: 'POST', body: fd });
-    const json = await res.json();
-    if (!json.ok) {
-      showFlash('error', `${file.name}: ${json.error || 'upload failed'}`);
+
+    // Step 1: ask server for a signed upload URL.
+    let signJson: any;
+    try {
+      const signRes = await fetch('/api/admin/media/sign-upload', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, content_type: file.type }),
+      });
+      signJson = await signRes.json();
+    } catch {
+      showFlash('error', `${file.name}: could not reach server`);
       return;
     }
+    if (!signJson?.ok) {
+      showFlash('error', `${file.name}: ${signJson?.error || 'sign failed'}`);
+      return;
+    }
+
+    // Step 2: PUT the file straight to Supabase, skipping the Netlify function
+    // body limit. The signed URL carries its own auth token.
+    try {
+      const putRes = await fetch(signJson.data.signed_url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-upsert': 'false',
+        },
+        body: file,
+      });
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => '');
+        showFlash('error', `${file.name}: upload failed (${putRes.status}) ${text.slice(0, 120)}`);
+        return;
+      }
+    } catch {
+      showFlash('error', `${file.name}: upload failed`);
+      return;
+    }
+
+    // Step 3: add to grid using the public URL the server handed us.
+    const newItem: MediaItem = {
+      name: signJson.data.path,
+      size: file.size,
+      mimetype: file.type || null,
+      created_at: new Date().toISOString(),
+      updated_at: null,
+      url: signJson.data.public_url,
+    };
     removeEmptyState();
-    items.unshift(json.data);
-    grid.prepend(renderCard(json.data));
+    items.unshift(newItem);
+    grid.prepend(renderCard(newItem));
     updateCount();
     showFlash('success', `Uploaded ${file.name}`);
   }
