@@ -1,0 +1,367 @@
+---
+import AdminLayout from '~/layouts/AdminLayout.astro';
+import { createSupabaseAdminClient } from '~/lib/supabase/admin';
+import { listMedia, type MediaItem } from '~/lib/media';
+
+export const prerender = false;
+
+const supabase = createSupabaseAdminClient();
+let items: MediaItem[] = [];
+let loadError: string | null = null;
+try {
+  items = await listMedia(supabase);
+} catch (e) {
+  loadError = (e as Error).message;
+}
+
+function formatSize(bytes: number | null): string {
+  if (bytes === null) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const initialJson = JSON.stringify(items);
+---
+
+<AdminLayout title="Media">
+  <div class="page-header">
+    <h1>Media library</h1>
+    <div class="muted" id="media-count">{items.length} file{items.length === 1 ? '' : 's'}</div>
+  </div>
+
+  {loadError && <div class="flash flash-error">{loadError}</div>}
+
+  <div class="dropzone" id="media-dropzone" tabindex="0" role="button" aria-label="Upload files">
+    <input type="file" id="media-input" accept="image/*" multiple hidden />
+    <div class="dropzone-inner">
+      <strong>Drop files here</strong>
+      <span class="muted">or click to choose · images only · 10MB max each</span>
+    </div>
+  </div>
+
+  <div class="flash" id="media-flash" hidden></div>
+
+  <div class="grid" id="media-grid" data-initial={initialJson}>
+    {
+      items.length === 0 ? (
+        <div class="empty muted">Nothing uploaded yet.</div>
+      ) : (
+        items.map((m) => (
+          <div class="card" data-name={m.name}>
+            <div class="thumb">
+              {m.mimetype?.startsWith('image/') ? (
+                <img src={m.url} alt={m.name} loading="lazy" />
+              ) : (
+                <div class="thumb-empty muted">{m.mimetype || 'file'}</div>
+              )}
+            </div>
+            <div class="meta">
+              <div class="name" title={m.name}>
+                {m.name}
+              </div>
+              <div class="sub muted">{formatSize(m.size)}</div>
+            </div>
+            <div class="actions">
+              <button type="button" class="btn copy" data-url={m.url}>
+                Copy URL
+              </button>
+              <button type="button" class="btn btn-danger delete" data-name={m.name}>
+                Delete
+              </button>
+            </div>
+          </div>
+        ))
+      )
+    }
+  </div>
+</AdminLayout>
+
+<script>
+  type MediaItem = {
+    name: string;
+    size: number | null;
+    mimetype: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+    url: string;
+  };
+
+  const MAX_BYTES = 10 * 1024 * 1024;
+
+  const grid = document.getElementById('media-grid') as HTMLElement;
+  const dropzone = document.getElementById('media-dropzone') as HTMLElement;
+  const fileInput = document.getElementById('media-input') as HTMLInputElement;
+  const flash = document.getElementById('media-flash') as HTMLElement;
+  const countEl = document.getElementById('media-count') as HTMLElement;
+
+  const items: MediaItem[] = JSON.parse(grid.dataset.initial || '[]');
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+    if (kind === 'success') {
+      setTimeout(() => {
+        flash.hidden = true;
+      }, 2200);
+    }
+  }
+
+  function updateCount() {
+    countEl.textContent = `${items.length} file${items.length === 1 ? '' : 's'}`;
+  }
+
+  function formatSize(bytes: number | null): string {
+    if (bytes === null) return '';
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function escapeAttr(s: string): string {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/"/g, '&quot;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function removeEmptyState() {
+    const empty = grid.querySelector('.empty');
+    if (empty) empty.remove();
+  }
+
+  function renderCard(m: MediaItem): HTMLElement {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.dataset.name = m.name;
+    const isImg = !!m.mimetype && m.mimetype.startsWith('image/');
+    card.innerHTML = `
+      <div class="thumb">
+        ${
+          isImg
+            ? `<img src="${escapeAttr(m.url)}" alt="${escapeAttr(m.name)}" loading="lazy" />`
+            : `<div class="thumb-empty muted">${escapeAttr(m.mimetype || 'file')}</div>`
+        }
+      </div>
+      <div class="meta">
+        <div class="name" title="${escapeAttr(m.name)}">${escapeAttr(m.name)}</div>
+        <div class="sub muted">${formatSize(m.size)}</div>
+      </div>
+      <div class="actions">
+        <button type="button" class="btn copy" data-url="${escapeAttr(m.url)}">Copy URL</button>
+        <button type="button" class="btn btn-danger delete" data-name="${escapeAttr(m.name)}">Delete</button>
+      </div>
+    `;
+    return card;
+  }
+
+  async function uploadFile(file: File) {
+    if (!file.type.startsWith('image/')) {
+      showFlash('error', `${file.name}: not an image`);
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      showFlash('error', `${file.name}: exceeds 10MB`);
+      return;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch('/api/admin/media', { method: 'POST', body: fd });
+    const json = await res.json();
+    if (!json.ok) {
+      showFlash('error', `${file.name}: ${json.error || 'upload failed'}`);
+      return;
+    }
+    removeEmptyState();
+    items.unshift(json.data);
+    grid.prepend(renderCard(json.data));
+    updateCount();
+    showFlash('success', `Uploaded ${file.name}`);
+  }
+
+  async function uploadAll(files: FileList | File[]) {
+    for (const f of Array.from(files)) {
+      await uploadFile(f);
+    }
+  }
+
+  dropzone.addEventListener('click', () => fileInput.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files && fileInput.files.length) {
+      uploadAll(fileInput.files);
+      fileInput.value = '';
+    }
+  });
+  ['dragenter', 'dragover'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('drag-over');
+    }),
+  );
+  ['dragleave', 'drop'].forEach((evt) =>
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('drag-over');
+    }),
+  );
+  dropzone.addEventListener('drop', (e: DragEvent) => {
+    if (e.dataTransfer?.files && e.dataTransfer.files.length) {
+      uploadAll(e.dataTransfer.files);
+    }
+  });
+
+  grid.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+
+    const copyBtn = target.closest('.copy') as HTMLButtonElement | null;
+    if (copyBtn) {
+      const url = copyBtn.dataset.url || '';
+      try {
+        await navigator.clipboard.writeText(url);
+        showFlash('success', 'URL copied');
+      } catch {
+        showFlash('error', "Couldn't copy — long-press the image to save URL");
+      }
+      return;
+    }
+
+    const delBtn = target.closest('.delete') as HTMLButtonElement | null;
+    if (delBtn) {
+      const name = delBtn.dataset.name || '';
+      if (!confirm(`Delete ${name}?`)) return;
+      delBtn.disabled = true;
+      const res = await fetch(`/api/admin/media/${encodeURIComponent(name)}`, {
+        method: 'DELETE',
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Delete failed');
+        delBtn.disabled = false;
+        return;
+      }
+      const card = grid.querySelector(`.card[data-name="${CSS.escape(name)}"]`);
+      card?.remove();
+      const idx = items.findIndex((i) => i.name === name);
+      if (idx >= 0) items.splice(idx, 1);
+      updateCount();
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty muted';
+        empty.textContent = 'Nothing uploaded yet.';
+        grid.appendChild(empty);
+      }
+      showFlash('success', 'Deleted');
+    }
+  });
+</script>
+
+<style>
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 8px;
+    padding: 2rem 1rem;
+    text-align: center;
+    cursor: pointer;
+    background: #fbfaf6;
+    transition: border-color 0.15s, background 0.15s;
+    margin-bottom: 1rem;
+  }
+  .dropzone:hover,
+  .dropzone:focus {
+    border-color: var(--accent);
+    background: #f5f2ea;
+    outline: none;
+  }
+  .dropzone.drag-over {
+    border-color: var(--accent);
+    background: #e9f0ef;
+  }
+  .dropzone-inner {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    color: var(--muted);
+  }
+  .dropzone-inner strong {
+    color: var(--text);
+    font-size: 1.05rem;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 0.85rem;
+  }
+  .empty {
+    grid-column: 1 / -1;
+    padding: 2rem;
+    text-align: center;
+    background: var(--panel);
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.6rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    min-width: 0;
+  }
+  .thumb {
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+    border-radius: 6px;
+    background: var(--muted-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .thumb-empty {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .meta {
+    min-width: 0;
+  }
+  .name {
+    font-size: 0.82rem;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sub {
+    font-size: 0.75rem;
+    margin-top: 0.15rem;
+  }
+  .actions {
+    display: flex;
+    gap: 0.35rem;
+  }
+  .actions .btn {
+    flex: 1;
+    padding: 0.35rem 0.45rem;
+    font-size: 0.78rem;
+  }
+  .flash {
+    margin-bottom: 0.8rem;
+  }
+</style>
