@@ -1,7 +1,13 @@
+// Creates a local order row in `pending` status, then creates a Stripe
+// Checkout Session pointing at it. Payment confirmation happens in the
+// /api/webhooks/stripe handler — we do NOT mark products sold here.
 import type { APIRoute } from 'astro';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { validateCart, fetchPrimaryImagePaths } from '~/lib/cart-validate';
-import { FLAT_SHIPPING_CENTS, US_STATES } from '~/lib/orders';
+import { getUspsGroundAdvantageRate, loadShippingSettings } from '~/lib/shippo';
+import { publicImageUrl } from '~/lib/images';
+import { getStripe } from '~/lib/stripe';
+import { US_STATES } from '~/lib/orders';
 import { ok, fail } from '~/lib/api';
 
 export const prerender = false;
@@ -10,7 +16,7 @@ const US_STATE_SET = new Set(US_STATES.map((s) => s.value));
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ZIP_RE = /^\d{5}(-\d{4})?$/;
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, url }) => {
   let body: any;
   try {
     body = await request.json();
@@ -21,7 +27,6 @@ export const POST: APIRoute = async ({ request }) => {
   const productIds: string[] = Array.isArray(body.product_ids)
     ? body.product_ids.filter((v: unknown) => typeof v === 'string')
     : [];
-
   if (productIds.length === 0) return fail('Cart is empty', 400);
 
   const customer = body.customer ?? {};
@@ -48,34 +53,82 @@ export const POST: APIRoute = async ({ request }) => {
   if (!US_STATE_SET.has(state)) return fail('Valid state is required', 400);
   if (!ZIP_RE.test(postal)) return fail('Valid ZIP code is required', 400);
 
+  const clientSentRateId =
+    typeof body.shipping_rate_id === 'string' ? body.shipping_rate_id : null;
+
   const supabase = createSupabaseAdminClient();
 
+  // (1) Re-validate cart server-side. Never trust the client.
   let validation;
   try {
     validation = await validateCart(supabase, productIds);
   } catch (e) {
     return fail((e as Error).message, 500);
   }
-
   if (validation.unavailable.length > 0) {
     return new Response(
       JSON.stringify({
         ok: false,
-        error: {
-          code: 'items_unavailable',
-          unavailable: validation.unavailable,
-        },
+        error: { code: 'items_unavailable', unavailable: validation.unavailable },
       }),
       { status: 409, headers: { 'content-type': 'application/json' } },
     );
   }
   if (validation.available.length === 0) return fail('Cart is empty', 400);
 
-  const subtotal = validation.available.reduce((sum, p) => sum + p.price_cents, 0);
-  const shipping = FLAT_SHIPPING_CENTS;
-  const tax = 0;
-  const total = subtotal + shipping + tax;
+  // (2) Re-fetch shipping rate (Shippo rates expire ~10 min; the client-sent
+  //     id is only a debugging breadcrumb).
+  const settings = await loadShippingSettings(supabase);
+  if (!settings) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: { code: 'shipping_not_configured', message: 'Shipping origin is not configured.' },
+      }),
+      { status: 500, headers: { 'content-type': 'application/json' } },
+    );
+  }
 
+  const freshRate = await getUspsGroundAdvantageRate({
+    settings,
+    to: {
+      name,
+      street1: line1,
+      street2: line2 ?? undefined,
+      city,
+      state,
+      zip: postal,
+      country,
+    },
+    itemCount: validation.available.length,
+  });
+
+  if (!freshRate) {
+    return new Response(
+      JSON.stringify({
+        ok: false,
+        error: {
+          code: 'shipping_unavailable',
+          message: "Couldn't confirm shipping. Please try again.",
+        },
+      }),
+      { status: 400, headers: { 'content-type': 'application/json' } },
+    );
+  }
+
+  if (clientSentRateId && clientSentRateId !== freshRate.rate_id) {
+    console.info(
+      `checkout: shipping rate re-fetched (client=${clientSentRateId}, fresh=${freshRate.rate_id})`,
+    );
+  }
+
+  // (3) Calculate totals from DB + fresh rate.
+  const subtotalCents = validation.available.reduce((sum, p) => sum + p.price_cents, 0);
+  const shippingCents = freshRate.amount_cents;
+  const taxCents = 0; // Stripe Tax adds tax to amount_total at session time.
+  const totalCents = subtotalCents + shippingCents;
+
+  // (4) Insert order row.
   const { data: order, error: orderErr } = await supabase
     .from('orders')
     .insert({
@@ -90,10 +143,13 @@ export const POST: APIRoute = async ({ request }) => {
       ship_to_state: state,
       ship_to_postal_code: postal,
       ship_to_country: country,
-      subtotal_cents: subtotal,
-      shipping_cents: shipping,
-      tax_cents: tax,
-      total_cents: total,
+      subtotal_cents: subtotalCents,
+      shipping_cents: shippingCents,
+      tax_cents: taxCents,
+      total_cents: totalCents,
+      shippo_rate_id: freshRate.rate_id,
+      shipping_service_level: freshRate.service_level,
+      shipping_estimated_days: freshRate.estimated_days,
       customer_notes: customerNotes,
     })
     .select('id, order_number')
@@ -122,22 +178,94 @@ export const POST: APIRoute = async ({ request }) => {
     return fail(itemsErr.message, 500);
   }
 
-  // TODO(stripe): Replace this block with Stripe Checkout Session creation.
-  // - Create session with line_items from order_items
-  // - Set metadata.order_id = order.id
-  // - Set success_url = /order/success?session_id={CHECKOUT_SESSION_ID}
-  // - Set cancel_url = /checkout?cancelled=1
-  // - Return { redirect_to: session.url } instead of the local success page
-  const redirectTo = `/order/success?order=${encodeURIComponent(order.order_number)}`;
+  // (5) Create Stripe Checkout Session.
+  const siteUrl = import.meta.env.PUBLIC_SITE_URL || url.origin;
 
-  return ok(
-    {
-      order_id: order.id,
-      order_number: order.order_number,
-      redirect_to: redirectTo,
-    },
-    { status: 201 },
-  );
+  const lineItems = validation.available.map((p) => {
+    const path = imagePaths.get(p.id) ?? null;
+    const imageUrl = path ? publicImageUrl(supabase, path) : null;
+    return {
+      price_data: {
+        currency: 'usd',
+        product_data: {
+          name: p.title,
+          description: `Piece ${p.piece_id}`,
+          images: imageUrl ? [imageUrl] : [],
+        },
+        unit_amount: p.price_cents,
+        tax_behavior: 'exclusive' as const,
+      },
+      quantity: 1,
+    };
+  });
+
+  const descriptorSuffix = order.order_number
+    .replace(/[^a-zA-Z0-9]/g, '')
+    .slice(0, 22);
+
+  let session;
+  try {
+    const stripe = getStripe();
+    session = await stripe.checkout.sessions.create({
+      mode: 'payment',
+      payment_method_types: ['card'],
+      line_items: lineItems,
+      shipping_options: [
+        {
+          shipping_rate_data: {
+            type: 'fixed_amount',
+            fixed_amount: { amount: shippingCents, currency: 'usd' },
+            display_name: freshRate.service_level,
+            delivery_estimate: {
+              minimum: {
+                unit: 'business_day',
+                value: Math.max(2, freshRate.estimated_days - 1),
+              },
+              maximum: { unit: 'business_day', value: freshRate.estimated_days + 1 },
+            },
+            tax_behavior: 'exclusive',
+          },
+        },
+      ],
+      automatic_tax: { enabled: true },
+      customer_email: email,
+      shipping_address_collection: { allowed_countries: ['US'] },
+      metadata: {
+        order_id: order.id,
+        order_number: order.order_number,
+      },
+      payment_intent_data: {
+        metadata: {
+          order_id: order.id,
+          order_number: order.order_number,
+        },
+        statement_descriptor_suffix: descriptorSuffix,
+      },
+      success_url: `${siteUrl}/order/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${siteUrl}/checkout?cancelled=1`,
+      expires_at: Math.floor(Date.now() / 1000) + 30 * 60,
+    });
+  } catch (e) {
+    // Roll back the pending order so we don't accumulate zombie rows.
+    await supabase.from('order_items').delete().eq('order_id', order.id);
+    await supabase.from('orders').delete().eq('id', order.id);
+    console.error('Stripe session creation failed', e);
+    return fail((e as Error).message || 'Payment session failed', 500);
+  }
+
+  const { error: updErr } = await supabase
+    .from('orders')
+    .update({ stripe_checkout_session_id: session.id })
+    .eq('id', order.id);
+  if (updErr) {
+    console.warn('Failed to store stripe_checkout_session_id', updErr.message);
+  }
+
+  if (!session.url) {
+    return fail('Stripe did not return a session URL', 500);
+  }
+
+  return ok({ redirect_to: session.url, order_number: order.order_number });
 };
 
 function str(v: unknown): string {

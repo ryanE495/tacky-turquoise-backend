@@ -1,0 +1,224 @@
+---
+import { US_STATES } from '~/lib/orders';
+
+interface Settings {
+  ship_from_name: string;
+  ship_from_street1: string;
+  ship_from_street2: string | null;
+  ship_from_city: string;
+  ship_from_state: string;
+  ship_from_zip: string;
+  ship_from_phone: string | null;
+  ship_from_email: string | null;
+  default_length_in: number | string;
+  default_width_in: number | string;
+  default_height_in: number | string;
+  default_weight_oz: number | string;
+}
+
+interface Props {
+  settings: Settings;
+}
+
+const { settings } = Astro.props;
+---
+
+<form id="shipping-settings-form">
+  <div class="flash" id="form-flash" hidden></div>
+
+  <fieldset>
+    <legend>Ship from address</legend>
+    <div class="form-grid">
+      <div class="full">
+        <label for="ship_from_name">Name</label>
+        <input id="ship_from_name" name="ship_from_name" required value={settings.ship_from_name} />
+      </div>
+      <div class="full">
+        <label for="ship_from_street1">Street address</label>
+        <input id="ship_from_street1" name="ship_from_street1" required value={settings.ship_from_street1} />
+      </div>
+      <div class="full">
+        <label for="ship_from_street2">Line 2 <span class="muted">(optional)</span></label>
+        <input id="ship_from_street2" name="ship_from_street2" value={settings.ship_from_street2 ?? ''} />
+      </div>
+      <div>
+        <label for="ship_from_city">City</label>
+        <input id="ship_from_city" name="ship_from_city" required value={settings.ship_from_city} />
+      </div>
+      <div>
+        <label for="ship_from_state">State</label>
+        <select id="ship_from_state" name="ship_from_state" required>
+          {
+            US_STATES.map((s) => (
+              <option value={s.value} selected={settings.ship_from_state === s.value}>
+                {s.label}
+              </option>
+            ))
+          }
+        </select>
+      </div>
+      <div>
+        <label for="ship_from_zip">ZIP</label>
+        <input
+          id="ship_from_zip"
+          name="ship_from_zip"
+          required
+          inputmode="numeric"
+          pattern="\d{5}(-\d{4})?"
+          value={settings.ship_from_zip}
+        />
+      </div>
+      <div>
+        <label for="ship_from_phone">Phone <span class="muted">(optional)</span></label>
+        <input id="ship_from_phone" name="ship_from_phone" value={settings.ship_from_phone ?? ''} />
+        <div class="hint muted">Required by USPS for some shipments.</div>
+      </div>
+      <div class="full">
+        <label for="ship_from_email">Email <span class="muted">(optional)</span></label>
+        <input id="ship_from_email" name="ship_from_email" type="email" value={settings.ship_from_email ?? ''} />
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Default package</legend>
+    <p class="hint muted box-hint">
+      Used to calculate shipping rates. Most necklaces fit the same padded mailer — set once and
+      only update if packaging changes.
+    </p>
+    <div class="form-grid">
+      <div>
+        <label for="default_length_in">Length (in)</label>
+        <input
+          id="default_length_in"
+          name="default_length_in"
+          type="number"
+          step="0.1"
+          min="0.1"
+          required
+          value={settings.default_length_in}
+        />
+      </div>
+      <div>
+        <label for="default_width_in">Width (in)</label>
+        <input
+          id="default_width_in"
+          name="default_width_in"
+          type="number"
+          step="0.1"
+          min="0.1"
+          required
+          value={settings.default_width_in}
+        />
+      </div>
+      <div>
+        <label for="default_height_in">Height (in)</label>
+        <input
+          id="default_height_in"
+          name="default_height_in"
+          type="number"
+          step="0.1"
+          min="0.1"
+          required
+          value={settings.default_height_in}
+        />
+      </div>
+      <div>
+        <label for="default_weight_oz">Weight (oz)</label>
+        <input
+          id="default_weight_oz"
+          name="default_weight_oz"
+          type="number"
+          step="0.1"
+          min="0.1"
+          required
+          value={settings.default_weight_oz}
+        />
+        <div class="hint muted">Average weight of a packaged necklace.</div>
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="btn-primary" id="submit-btn">Save shipping settings</button>
+  </div>
+</form>
+
+<script>
+  const form = document.getElementById('shipping-settings-form') as HTMLFormElement;
+  const flash = document.getElementById('form-flash') as HTMLElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    flash.hidden = true;
+    submitBtn.disabled = true;
+
+    const fd = new FormData(form);
+    const body: Record<string, unknown> = {
+      ship_from_name: String(fd.get('ship_from_name') ?? '').trim(),
+      ship_from_street1: String(fd.get('ship_from_street1') ?? '').trim(),
+      ship_from_street2: String(fd.get('ship_from_street2') ?? '').trim(),
+      ship_from_city: String(fd.get('ship_from_city') ?? '').trim(),
+      ship_from_state: String(fd.get('ship_from_state') ?? '').trim(),
+      ship_from_zip: String(fd.get('ship_from_zip') ?? '').trim(),
+      ship_from_phone: String(fd.get('ship_from_phone') ?? '').trim(),
+      ship_from_email: String(fd.get('ship_from_email') ?? '').trim(),
+      default_length_in: parseFloat(String(fd.get('default_length_in') ?? '')),
+      default_width_in: parseFloat(String(fd.get('default_width_in') ?? '')),
+      default_height_in: parseFloat(String(fd.get('default_height_in') ?? '')),
+      default_weight_oz: parseFloat(String(fd.get('default_weight_oz') ?? '')),
+    };
+
+    try {
+      const res = await fetch('/api/admin/settings/shipping', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Save failed');
+      } else {
+        showFlash('success', 'Saved');
+      }
+    } catch {
+      showFlash('error', 'Network error');
+    }
+    submitBtn.disabled = false;
+  });
+</script>
+
+<style>
+  form {
+    max-width: 680px;
+  }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.1rem 1.25rem;
+    margin: 0 0 1rem;
+    background: var(--panel);
+  }
+  legend {
+    padding: 0 0.4rem;
+    font-weight: 600;
+  }
+  .box-hint {
+    margin: 0 0 0.9rem;
+    font-size: 0.88rem;
+  }
+  .hint {
+    font-size: 0.82rem;
+    margin-top: 0.3rem;
+  }
+  .actions {
+    margin-top: 1.5rem;
+  }
+</style>

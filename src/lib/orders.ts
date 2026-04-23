@@ -22,8 +22,6 @@ export interface CustomerInput {
   phone: string | null;
 }
 
-export const FLAT_SHIPPING_CENTS = 800;
-
 export interface AvailableCartProduct {
   id: string;
   slug: string;

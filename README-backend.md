@@ -170,6 +170,60 @@ Supabase dashboard → **Authentication → Email Templates** → customize **In
 
 ---
 
+## 9. Stripe + Shippo (phase 2)
+
+Checkout now talks to real Stripe and fetches live USPS Ground Advantage rates from Shippo.
+
+### Required env vars (server + Netlify)
+
+```
+PUBLIC_SITE_URL=https://<your-production-domain>   # or http://localhost:4322 locally
+PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_test_...           # test for now, swap to pk_live_... at launch
+STRIPE_SECRET_KEY=sk_test_...
+STRIPE_WEBHOOK_SECRET=                              # fill in after creating the endpoint (see below)
+SHIPPO_API_KEY=shippo_test_...
+```
+
+`PUBLIC_SITE_URL` is used to build the Stripe success/cancel URLs. On Netlify, set this to your production domain; locally it defaults to the current request origin.
+
+### Webhook setup (one-time per environment)
+
+1. Deploy the app once so `POST /api/webhooks/stripe` is live at `https://<your-domain>/api/webhooks/stripe`.
+2. Stripe Dashboard → **Developers → Webhooks → Add endpoint**.
+3. Endpoint URL: `https://<your-domain>/api/webhooks/stripe`.
+4. Events to send: `checkout.session.completed`, `checkout.session.expired`, `payment_intent.payment_failed`.
+5. Click **Add endpoint**, then **Reveal** the signing secret (`whsec_...`).
+6. Paste that value into Netlify → Site configuration → Environment variables → `STRIPE_WEBHOOK_SECRET`.
+7. Trigger a redeploy so the new env var is available.
+
+For **local testing**, use the Stripe CLI:
+
+```
+stripe login
+stripe listen --forward-to http://localhost:4322/api/webhooks/stripe
+```
+
+The CLI prints a local webhook signing secret (`whsec_...`) you drop into your local `.env`.
+
+### Shippo
+
+The bundled API key is a **test token** (`shippo_test_...`). Test tokens return real rate shapes but cannot buy real labels. When going live, request a live token from Shippo, paste it into `SHIPPO_API_KEY` on Netlify, and redeploy.
+
+### Shipping origin
+
+Edit the ship-from address and default package dimensions at **Admin → Settings → Shipping**. Set once — rates use this every time.
+
+### Flow summary
+
+1. Customer fills in the shipping address on `/checkout`; the form debounces and calls `/api/shipping/quote`.
+2. Quote comes back from Shippo → UI updates, **Complete order** unlocks.
+3. `/api/checkout/create` re-validates the cart, re-fetches a fresh rate (Shippo rates expire ~10 min), creates the `orders` row as `pending`, creates a Stripe Checkout Session, redirects to the Stripe-hosted payment page.
+4. Customer pays → Stripe redirects to `/order/success?session_id=…`.
+5. Stripe fires `checkout.session.completed` → our webhook flips the order to `paid`, marks the products `sold`.
+6. `/order/success` polls `/api/orders/by-session` every 2 s for up to 30 s, handles the small window between redirect and webhook delivery.
+
+---
+
 ## File map
 
 ```

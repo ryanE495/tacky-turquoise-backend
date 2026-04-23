@@ -1,7 +1,7 @@
 ---
 import SiteLayout from '~/layouts/SiteLayout.astro';
 import UnavailableItemsBanner from '~/components/UnavailableItemsBanner.astro';
-import { US_STATES, FLAT_SHIPPING_CENTS } from '~/lib/orders';
+import { US_STATES } from '~/lib/orders';
 
 export const prerender = false;
 ---
@@ -93,9 +93,9 @@ export const prerender = false;
             <span>Subtotal</span>
             <span class="amount" id="subtotal">—</span>
           </div>
-          <div class="row">
+          <div class="row" id="shipping-row">
             <span>Shipping</span>
-            <span class="amount" id="shipping">—</span>
+            <span class="amount" id="shipping-display">Enter address to calculate</span>
           </div>
           <div class="row muted">
             <span>Tax</span>
@@ -106,7 +106,7 @@ export const prerender = false;
             <span class="amount" id="total">—</span>
           </div>
         </div>
-        <button type="button" id="complete-btn" class="btn btn-primary complete-btn">
+        <button type="button" id="complete-btn" class="btn btn-primary complete-btn" disabled>
           Complete order
         </button>
         <div class="redirect-note muted">You'll be redirected to secure payment.</div>
@@ -114,10 +114,6 @@ export const prerender = false;
     </aside>
   </div>
 </SiteLayout>
-
-<script define:vars={{ SHIPPING_CENTS: FLAT_SHIPPING_CENTS }}>
-  window.__CHECKOUT_SHIPPING__ = SHIPPING_CENTS;
-</script>
 
 <script>
   import { getCart, removeManyFromCart } from '~/lib/cart';
@@ -138,20 +134,31 @@ export const prerender = false;
     title?: string;
     slug?: string;
   };
-
-  const SHIPPING_CENTS: number = (window as any).__CHECKOUT_SHIPPING__ ?? 800;
+  type ShippingQuote = {
+    rate_id: string;
+    amount_cents: number;
+    service_level: string;
+    estimated_days: number;
+    provider: string;
+  };
 
   const loading = document.getElementById('checkout-loading') as HTMLElement;
   const errorEl = document.getElementById('checkout-error') as HTMLElement;
   const body = document.getElementById('checkout-body') as HTMLElement;
   const itemsEl = document.getElementById('summary-items') as HTMLUListElement;
   const subtotalEl = document.getElementById('subtotal') as HTMLElement;
-  const shippingEl = document.getElementById('shipping') as HTMLElement;
+  const shippingDisplay = document.getElementById('shipping-display') as HTMLElement;
+  const shippingRow = document.getElementById('shipping-row') as HTMLElement;
   const totalEl = document.getElementById('total') as HTMLElement;
   const form = document.getElementById('checkout-form') as HTMLFormElement;
   const completeBtn = document.getElementById('complete-btn') as HTMLButtonElement;
 
   let currentCartIds: string[] = [];
+  let currentItems: Available[] = [];
+  let shippingQuote: ShippingQuote | null = null;
+  let debounceTimer: number | null = null;
+  let inflightController: AbortController | null = null;
+  let quoteSeq = 0;
 
   function escapeAttr(s: string): string {
     return s
@@ -161,8 +168,8 @@ export const prerender = false;
       .replace(/>/g, '&gt;');
   }
 
-  function renderSummary(available: Available[]) {
-    itemsEl.innerHTML = available
+  function renderSummary() {
+    itemsEl.innerHTML = currentItems
       .map(
         (p) => `
       <li class="item">
@@ -174,21 +181,146 @@ export const prerender = false;
           <div class="muted piece-id">${escapeAttr(p.piece_id)}</div>
         </div>
         <div class="price">${formatPrice(p.price_cents)}</div>
-      </li>
-    `,
+      </li>`,
       )
       .join('');
 
-    const subtotal = available.reduce((sum, p) => sum + p.price_cents, 0);
-    const total = subtotal + SHIPPING_CENTS;
+    const subtotal = currentItems.reduce((sum, p) => sum + p.price_cents, 0);
     subtotalEl.textContent = formatPrice(subtotal);
-    shippingEl.textContent = formatPrice(SHIPPING_CENTS);
-    totalEl.textContent = formatPrice(total);
+    renderShippingLine();
+  }
+
+  function renderShippingLine() {
+    const subtotal = currentItems.reduce((sum, p) => sum + p.price_cents, 0);
+    shippingRow.classList.remove('flash-error');
+    if (shippingQuote) {
+      shippingDisplay.textContent = `${shippingQuote.service_level} (~${shippingQuote.estimated_days} days) — ${formatPrice(shippingQuote.amount_cents)}`;
+      shippingDisplay.classList.remove('muted');
+      totalEl.textContent = formatPrice(subtotal + shippingQuote.amount_cents);
+      completeBtn.disabled = false;
+    } else {
+      totalEl.textContent = '—';
+      completeBtn.disabled = true;
+    }
+  }
+
+  function setShippingState(state: 'idle' | 'loading' | 'error', message?: string) {
+    shippingRow.classList.remove('flash-error');
+    switch (state) {
+      case 'idle':
+        shippingDisplay.textContent = message ?? 'Enter address to calculate';
+        shippingDisplay.classList.add('muted');
+        break;
+      case 'loading':
+        shippingDisplay.textContent = 'Calculating…';
+        shippingDisplay.classList.add('muted');
+        break;
+      case 'error':
+        shippingDisplay.textContent = message ?? 'Unable to calculate shipping.';
+        shippingDisplay.classList.remove('muted');
+        shippingRow.classList.add('flash-error');
+        break;
+    }
+    totalEl.textContent = '—';
+    completeBtn.disabled = true;
   }
 
   function showError(msg: string) {
     errorEl.hidden = false;
     errorEl.textContent = msg;
+  }
+  function clearError() {
+    errorEl.hidden = true;
+  }
+
+  function getAddressFromForm() {
+    const fd = new FormData(form);
+    return {
+      name: String(fd.get('name') ?? '').trim() || 'Recipient',
+      street1: String(fd.get('line1') ?? '').trim(),
+      street2: String(fd.get('line2') ?? '').trim() || undefined,
+      city: String(fd.get('city') ?? '').trim(),
+      state: String(fd.get('state') ?? '').trim(),
+      zip: String(fd.get('postal_code') ?? '').trim(),
+      country: 'US',
+    };
+  }
+
+  function addressReadyForQuote(): boolean {
+    const a = getAddressFromForm();
+    return (
+      !!a.street1 &&
+      !!a.city &&
+      !!a.state &&
+      /^\d{5}(-\d{4})?$/.test(a.zip)
+    );
+  }
+
+  async function fetchQuote() {
+    if (!addressReadyForQuote()) {
+      shippingQuote = null;
+      setShippingState('idle');
+      return;
+    }
+
+    shippingQuote = null;
+    setShippingState('loading');
+
+    if (inflightController) {
+      inflightController.abort();
+    }
+    const controller = new AbortController();
+    inflightController = controller;
+    const seq = ++quoteSeq;
+
+    try {
+      const res = await fetch('/api/shipping/quote', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          product_ids: currentCartIds,
+          shipping_address: getAddressFromForm(),
+        }),
+        signal: controller.signal,
+      });
+      const json = await res.json();
+      if (seq !== quoteSeq) return; // a newer request started
+      if (!json.ok) {
+        if (json.error?.code === 'items_unavailable') {
+          removeManyFromCart(
+            (json.error.unavailable ?? []).map((u: Unavailable) => u.id),
+          );
+          window.location.href = '/cart?unavailable=1';
+          return;
+        }
+        setShippingState('error', json.error?.message ?? 'Unable to calculate shipping.');
+        return;
+      }
+      shippingQuote = json.data as ShippingQuote;
+      renderShippingLine();
+    } catch (err) {
+      if ((err as DOMException)?.name === 'AbortError') return;
+      setShippingState('error', "Couldn't reach the shipping service. Try again.");
+    }
+  }
+
+  function scheduleQuote() {
+    if (debounceTimer !== null) window.clearTimeout(debounceTimer);
+    shippingQuote = null;
+    setShippingState('loading');
+    debounceTimer = window.setTimeout(() => {
+      debounceTimer = null;
+      fetchQuote();
+    }, 500);
+  }
+
+  function wireAddressListeners() {
+    const ids = ['name', 'line1', 'line2', 'city', 'state', 'postal_code'];
+    for (const id of ids) {
+      const el = document.getElementById(id) as HTMLInputElement | HTMLSelectElement;
+      el.addEventListener('input', scheduleQuote);
+      el.addEventListener('change', scheduleQuote);
+    }
   }
 
   async function bootstrap() {
@@ -197,7 +329,6 @@ export const prerender = false;
       window.location.href = '/shop';
       return;
     }
-
     const res = await fetch('/api/cart/validate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -214,7 +345,6 @@ export const prerender = false;
 
     if (unavailable.length > 0) {
       removeManyFromCart(unavailable.map((u) => u.id));
-      // Redirect back to cart; banner there explains what happened.
       window.location.href = '/cart?unavailable=1';
       return;
     }
@@ -224,12 +354,14 @@ export const prerender = false;
     }
 
     currentCartIds = available.map((p) => p.id);
+    currentItems = available;
     loading.hidden = true;
     body.hidden = false;
-    renderSummary(available);
+    renderSummary();
+    wireAddressListeners();
   }
 
-  function collectForm() {
+  function collectPayload() {
     const fd = new FormData(form);
     return {
       customer: {
@@ -238,6 +370,7 @@ export const prerender = false;
         phone: String(fd.get('phone') ?? '').trim() || null,
       },
       shipping_address: {
+        name: String(fd.get('name') ?? '').trim(),
         line1: String(fd.get('line1') ?? '').trim(),
         line2: String(fd.get('line2') ?? '').trim() || null,
         city: String(fd.get('city') ?? '').trim(),
@@ -249,20 +382,24 @@ export const prerender = false;
     };
   }
 
-  function validateForm(payload: ReturnType<typeof collectForm>): string | null {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.customer.email)) return 'Valid email is required.';
-    if (!payload.customer.name) return 'Name is required.';
-    if (!payload.shipping_address.line1) return 'Address is required.';
-    if (!payload.shipping_address.city) return 'City is required.';
-    if (!payload.shipping_address.state) return 'State is required.';
-    if (!/^\d{5}(-\d{4})?$/.test(payload.shipping_address.postal_code)) return 'Valid ZIP is required.';
+  function validatePayload(p: ReturnType<typeof collectPayload>): string | null {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p.customer.email)) return 'Valid email is required.';
+    if (!p.customer.name) return 'Name is required.';
+    if (!p.shipping_address.line1) return 'Address is required.';
+    if (!p.shipping_address.city) return 'City is required.';
+    if (!p.shipping_address.state) return 'State is required.';
+    if (!/^\d{5}(-\d{4})?$/.test(p.shipping_address.postal_code)) return 'Valid ZIP is required.';
     return null;
   }
 
   completeBtn.addEventListener('click', async () => {
-    errorEl.hidden = true;
-    const payload = collectForm();
-    const valErr = validateForm(payload);
+    clearError();
+    if (!shippingQuote) {
+      showError('Waiting for shipping quote…');
+      return;
+    }
+    const payload = collectPayload();
+    const valErr = validatePayload(payload);
     if (valErr) {
       showError(valErr);
       return;
@@ -276,10 +413,10 @@ export const prerender = false;
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         product_ids: currentCartIds,
+        shipping_rate_id: shippingQuote.rate_id,
         ...payload,
       }),
     });
-
     const json = await res.json();
 
     if (!json.ok) {
@@ -291,7 +428,11 @@ export const prerender = false;
         window.location.href = `/order/failed?reason=sold_out&items=${encodeURIComponent(slugs.join(','))}`;
         return;
       }
-      showError(typeof json.error === 'string' ? json.error : 'Checkout failed.');
+      showError(
+        typeof json.error === 'string'
+          ? json.error
+          : json.error?.message ?? 'Checkout failed.',
+      );
       completeBtn.disabled = false;
       completeBtn.textContent = 'Complete order';
       return;
@@ -426,6 +567,7 @@ export const prerender = false;
     display: flex;
     justify-content: space-between;
     font-size: 0.95rem;
+    gap: 0.75rem;
   }
   .totals .row.total {
     font-weight: 700;
@@ -434,8 +576,12 @@ export const prerender = false;
     padding-top: 0.5rem;
     margin-top: 0.25rem;
   }
+  .totals .row.flash-error {
+    color: var(--site-danger);
+  }
   .amount {
     font-variant-numeric: tabular-nums;
+    text-align: right;
   }
   .complete-btn {
     width: 100%;

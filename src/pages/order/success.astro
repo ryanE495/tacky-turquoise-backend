@@ -6,12 +6,32 @@ export const prerender = false;
 
 <SiteLayout title="Order confirmed · Tacky Turquoise">
   <div class="wrap">
-    <div id="loading" class="muted loading">Confirming your order…</div>
+    <div id="loading" class="loading panel" hidden>
+      <div class="spinner" aria-hidden="true"></div>
+      <div class="muted" id="loading-text">Confirming your payment…</div>
+    </div>
+
+    <div id="cancelled" class="panel" hidden>
+      <h1>Checkout cancelled</h1>
+      <p class="muted">Your cart is saved — come back when you're ready.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/cart">Return to cart</a>
+        <a class="btn" href="/shop">Back to shop</a>
+      </div>
+    </div>
 
     <div id="not-found" class="panel" hidden>
       <h1>Order not found</h1>
       <p class="muted">We couldn't find that order. Try reloading, or head back to the shop.</p>
       <a class="btn btn-primary" href="/shop">Back to shop</a>
+    </div>
+
+    <div id="still-processing" class="panel" hidden>
+      <h1>Your payment is still processing</h1>
+      <p class="muted" id="processing-msg">
+        You'll receive an email confirmation shortly. No need to refresh — we've got this.
+      </p>
+      <a class="btn" href="/shop">Continue shopping</a>
     </div>
 
     <div id="confirmed" class="panel" hidden>
@@ -22,18 +42,10 @@ export const prerender = false;
       <ul class="items" id="items"></ul>
 
       <div class="totals">
-        <div class="row">
-          <span>Subtotal</span>
-          <span class="amount" id="subtotal">—</span>
-        </div>
-        <div class="row">
-          <span>Shipping</span>
-          <span class="amount" id="shipping">—</span>
-        </div>
-        <div class="row total">
-          <span>Total</span>
-          <span class="amount" id="total">—</span>
-        </div>
+        <div class="row"><span>Subtotal</span><span class="amount" id="subtotal">—</span></div>
+        <div class="row"><span>Shipping</span><span class="amount" id="shipping">—</span></div>
+        <div class="row" id="tax-row" hidden><span>Tax</span><span class="amount" id="tax">—</span></div>
+        <div class="row total"><span>Total paid</span><span class="amount" id="total">—</span></div>
       </div>
 
       <div class="ship-to">
@@ -42,6 +54,7 @@ export const prerender = false;
       </div>
 
       <p class="email-note muted" id="email-note"></p>
+      <p class="delivery muted" id="delivery-note" hidden></p>
 
       <a class="btn" href="/shop">Continue shopping</a>
     </div>
@@ -53,19 +66,26 @@ export const prerender = false;
   import { formatPrice } from '~/lib/format';
 
   const params = new URLSearchParams(window.location.search);
-  const orderNumber = params.get('order')?.trim() || '';
+  const sessionId = params.get('session_id')?.trim() || '';
+  const wasCancelled = params.get('cancelled') === '1';
 
   const loading = document.getElementById('loading') as HTMLElement;
+  const loadingText = document.getElementById('loading-text') as HTMLElement;
+  const cancelled = document.getElementById('cancelled') as HTMLElement;
   const notFound = document.getElementById('not-found') as HTMLElement;
+  const stillProcessing = document.getElementById('still-processing') as HTMLElement;
   const confirmed = document.getElementById('confirmed') as HTMLElement;
   const thankYou = document.getElementById('thank-you') as HTMLElement;
   const orderLine = document.getElementById('order-line') as HTMLElement;
   const itemsEl = document.getElementById('items') as HTMLUListElement;
   const subtotalEl = document.getElementById('subtotal') as HTMLElement;
   const shippingEl = document.getElementById('shipping') as HTMLElement;
+  const taxRow = document.getElementById('tax-row') as HTMLElement;
+  const taxEl = document.getElementById('tax') as HTMLElement;
   const totalEl = document.getElementById('total') as HTMLElement;
   const shipToEl = document.getElementById('ship-to') as HTMLElement;
   const emailNote = document.getElementById('email-note') as HTMLElement;
+  const deliveryNote = document.getElementById('delivery-note') as HTMLElement;
 
   function escapeHtml(s: string): string {
     return s
@@ -75,53 +95,52 @@ export const prerender = false;
       .replace(/"/g, '&quot;');
   }
 
-  async function init() {
-    if (!orderNumber) {
-      loading.hidden = true;
-      notFound.hidden = false;
-      return;
-    }
-
-    // TODO(stripe): Remove this stub call. Production payment confirmation
-    // comes from Stripe's checkout.session.completed webhook, not the client.
-    await fetch(`/api/orders/${encodeURIComponent(orderNumber)}/mark-paid-stub`, {
-      method: 'POST',
-    }).catch(() => undefined);
-
-    const res = await fetch(
-      `/api/orders/by-number?order=${encodeURIComponent(orderNumber)}`,
-    ).catch(() => null);
-
-    if (!res) {
-      loading.hidden = true;
-      notFound.hidden = false;
-      return;
-    }
-    const json = await res.json();
-    if (!json.ok) {
-      loading.hidden = true;
-      notFound.hidden = false;
-      return;
-    }
-
-    const o = json.data as {
-      order_number: string;
-      customer_name: string;
-      customer_email: string;
-      items: Array<{ title: string; piece_id: string; price_cents: number; primary_image_url: string | null }>;
-      ship_to: {
-        name: string;
-        line1: string;
-        line2: string | null;
-        city: string;
-        state: string;
-        postal_code: string;
-        country: string;
-      };
-      subtotal_cents: number;
-      shipping_cents: number;
-      total_cents: number;
+  type OrderPayload = {
+    order_number: string;
+    status: string;
+    customer_email: string;
+    customer_name: string;
+    items: Array<{
+      title: string;
+      piece_id: string;
+      price_cents: number;
+      primary_image_url: string | null;
+    }>;
+    ship_to: {
+      name: string;
+      line1: string;
+      line2: string | null;
+      city: string;
+      state: string;
+      postal_code: string;
+      country: string;
     };
+    subtotal_cents: number;
+    shipping_cents: number;
+    tax_cents: number;
+    total_cents: number;
+    shipping_service_level: string | null;
+    shipping_estimated_days: number | null;
+  };
+
+  async function fetchOrder(): Promise<OrderPayload | 'not_found' | 'error'> {
+    try {
+      const res = await fetch(
+        `/api/orders/by-session?session_id=${encodeURIComponent(sessionId)}`,
+      );
+      if (res.status === 404) return 'not_found';
+      if (!res.ok) return 'error';
+      const json = await res.json();
+      if (!json.ok) return 'not_found';
+      return json.data as OrderPayload;
+    } catch {
+      return 'error';
+    }
+  }
+
+  function renderConfirmed(o: OrderPayload) {
+    loading.hidden = true;
+    stillProcessing.hidden = true;
 
     const firstName = o.customer_name.split(/\s+/)[0] || 'there';
     thankYou.textContent = `Thank you, ${firstName}.`;
@@ -148,6 +167,10 @@ export const prerender = false;
 
     subtotalEl.textContent = formatPrice(o.subtotal_cents);
     shippingEl.textContent = formatPrice(o.shipping_cents);
+    if (o.tax_cents > 0) {
+      taxEl.textContent = formatPrice(o.tax_cents);
+      taxRow.hidden = false;
+    }
     totalEl.textContent = formatPrice(o.total_cents);
 
     const lines = [
@@ -161,10 +184,67 @@ export const prerender = false;
 
     emailNote.textContent = `We'll email you at ${o.customer_email} when it ships.`;
 
-    loading.hidden = true;
-    confirmed.hidden = false;
+    if (o.shipping_service_level && o.shipping_estimated_days) {
+      deliveryNote.textContent = `Estimated delivery: ${o.shipping_service_level}, ~${o.shipping_estimated_days} business days.`;
+      deliveryNote.hidden = false;
+    }
 
+    confirmed.hidden = false;
     clearCart();
+  }
+
+  async function init() {
+    if (wasCancelled) {
+      cancelled.hidden = false;
+      return;
+    }
+    if (!sessionId) {
+      notFound.hidden = false;
+      return;
+    }
+
+    loading.hidden = false;
+
+    // Webhook race: poll every 2s, up to 30s, waiting for status to flip to paid.
+    const startedAt = Date.now();
+    const deadline = startedAt + 30_000;
+    let attempt = 0;
+
+    while (true) {
+      attempt += 1;
+      const result = await fetchOrder();
+      if (result === 'not_found') {
+        loading.hidden = true;
+        notFound.hidden = false;
+        return;
+      }
+      if (result === 'error') {
+        // transient error — keep trying until deadline
+        if (Date.now() >= deadline) {
+          loading.hidden = true;
+          stillProcessing.hidden = false;
+          return;
+        }
+      } else if (result.status === 'paid') {
+        renderConfirmed(result);
+        return;
+      } else if (result.status === 'failed' || result.status === 'cancelled') {
+        loading.hidden = true;
+        notFound.hidden = false;
+        return;
+      } else {
+        if (attempt >= 3) {
+          loadingText.textContent = 'Still confirming — hang on a moment…';
+        }
+        if (Date.now() >= deadline) {
+          loading.hidden = true;
+          stillProcessing.hidden = false;
+          return;
+        }
+      }
+
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
 
   init();
@@ -175,16 +255,30 @@ export const prerender = false;
     max-width: 640px;
     margin: 0 auto;
   }
-  .loading {
-    text-align: center;
-    padding: 3rem 0;
-  }
   .panel {
     background: var(--site-panel);
     border: 1px solid var(--site-border);
     border-radius: 12px;
     padding: 1.75rem 1.5rem;
     text-align: center;
+  }
+  .loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 3rem 1.5rem;
+  }
+  .spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--site-muted-bg);
+    border-top-color: var(--site-accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to { transform: rotate(360deg); }
   }
   .check {
     display: inline-flex;
@@ -201,6 +295,13 @@ export const prerender = false;
   h1 {
     margin: 0 0 0.35rem;
     font-size: 1.5rem;
+  }
+  .actions {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 1rem;
   }
   .items {
     list-style: none;
@@ -283,8 +384,12 @@ export const prerender = false;
     font-weight: 600;
     margin-bottom: 0.4rem;
   }
-  .email-note {
+  .email-note,
+  .delivery {
     font-size: 0.92rem;
-    margin: 0.75rem 0 1.5rem;
+    margin: 0.35rem 0;
+  }
+  .delivery {
+    margin-bottom: 1.25rem;
   }
 </style>

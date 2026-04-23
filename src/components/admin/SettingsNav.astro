@@ -4,6 +4,7 @@ const current = Astro.url.pathname;
 const links = [
   { href: '/admin/settings', label: 'Overview', match: (p: string) => p === '/admin/settings' || p === '/admin/settings/' },
   { href: '/admin/settings/users', label: 'Users', match: (p: string) => p.startsWith('/admin/settings/users') },
+  { href: '/admin/settings/shipping', label: 'Shipping', match: (p: string) => p.startsWith('/admin/settings/shipping') },
 ];
 ---
 
