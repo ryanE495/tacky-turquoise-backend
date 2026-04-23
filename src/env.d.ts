@@ -9,6 +9,7 @@ interface ImportMetaEnv {
   readonly STRIPE_SECRET_KEY: string;
   readonly STRIPE_WEBHOOK_SECRET?: string;
   readonly SHIPPO_API_KEY: string;
+  readonly PUBLIC_FRONTEND_ORIGINS?: string;
 }
 
 interface ImportMeta {

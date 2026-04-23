@@ -9,6 +9,7 @@ import { publicImageUrl } from '~/lib/images';
 import { getStripe } from '~/lib/stripe';
 import { US_STATES } from '~/lib/orders';
 import { ok, fail } from '~/lib/api';
+import { handleOptions, withCors } from '~/lib/cors';
 
 export const prerender = false;
 
@@ -16,18 +17,22 @@ const US_STATE_SET = new Set(US_STATES.map((s) => s.value));
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ZIP_RE = /^\d{5}(-\d{4})?$/;
 
+export const OPTIONS: APIRoute = ({ request }) => handleOptions(request);
+
 export const POST: APIRoute = async ({ request, url }) => {
+  const wrap = (r: Response) => withCors(request, r);
+
   let body: any;
   try {
     body = await request.json();
   } catch {
-    return fail('Invalid JSON body', 400);
+    return wrap(fail('Invalid JSON body', 400));
   }
 
   const productIds: string[] = Array.isArray(body.product_ids)
     ? body.product_ids.filter((v: unknown) => typeof v === 'string')
     : [];
-  if (productIds.length === 0) return fail('Cart is empty', 400);
+  if (productIds.length === 0) return wrap(fail('Cart is empty', 400));
 
   const customer = body.customer ?? {};
   const addr = body.shipping_address ?? {};
@@ -46,12 +51,12 @@ export const POST: APIRoute = async ({ request, url }) => {
   const postal = str(addr.postal_code).trim();
   const country = 'US';
 
-  if (!EMAIL_RE.test(email)) return fail('Valid email is required', 400);
-  if (!name) return fail('Name is required', 400);
-  if (!line1) return fail('Address is required', 400);
-  if (!city) return fail('City is required', 400);
-  if (!US_STATE_SET.has(state)) return fail('Valid state is required', 400);
-  if (!ZIP_RE.test(postal)) return fail('Valid ZIP code is required', 400);
+  if (!EMAIL_RE.test(email)) return wrap(fail('Valid email is required', 400));
+  if (!name) return wrap(fail('Name is required', 400));
+  if (!line1) return wrap(fail('Address is required', 400));
+  if (!city) return wrap(fail('City is required', 400));
+  if (!US_STATE_SET.has(state)) return wrap(fail('Valid state is required', 400));
+  if (!ZIP_RE.test(postal)) return wrap(fail('Valid ZIP code is required', 400));
 
   const clientSentRateId =
     typeof body.shipping_rate_id === 'string' ? body.shipping_rate_id : null;
@@ -63,29 +68,33 @@ export const POST: APIRoute = async ({ request, url }) => {
   try {
     validation = await validateCart(supabase, productIds);
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return wrap(fail((e as Error).message, 500));
   }
   if (validation.unavailable.length > 0) {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: { code: 'items_unavailable', unavailable: validation.unavailable },
-      }),
-      { status: 409, headers: { 'content-type': 'application/json' } },
+    return wrap(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: { code: 'items_unavailable', unavailable: validation.unavailable },
+        }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ),
     );
   }
-  if (validation.available.length === 0) return fail('Cart is empty', 400);
+  if (validation.available.length === 0) return wrap(fail('Cart is empty', 400));
 
   // (2) Re-fetch shipping rate (Shippo rates expire ~10 min; the client-sent
   //     id is only a debugging breadcrumb).
   const settings = await loadShippingSettings(supabase);
   if (!settings) {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: { code: 'shipping_not_configured', message: 'Shipping origin is not configured.' },
-      }),
-      { status: 500, headers: { 'content-type': 'application/json' } },
+    return wrap(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: { code: 'shipping_not_configured', message: 'Shipping origin is not configured.' },
+        }),
+        { status: 500, headers: { 'content-type': 'application/json' } },
+      ),
     );
   }
 
@@ -104,15 +113,17 @@ export const POST: APIRoute = async ({ request, url }) => {
   });
 
   if (!freshRate) {
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error: {
-          code: 'shipping_unavailable',
-          message: "Couldn't confirm shipping. Please try again.",
-        },
-      }),
-      { status: 400, headers: { 'content-type': 'application/json' } },
+    return wrap(
+      new Response(
+        JSON.stringify({
+          ok: false,
+          error: {
+            code: 'shipping_unavailable',
+            message: "Couldn't confirm shipping. Please try again.",
+          },
+        }),
+        { status: 400, headers: { 'content-type': 'application/json' } },
+      ),
     );
   }
 
@@ -155,7 +166,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     .select('id, order_number')
     .single();
 
-  if (orderErr) return fail(orderErr.message, 500);
+  if (orderErr) return wrap(fail(orderErr.message, 500));
 
   const imagePaths = await fetchPrimaryImagePaths(
     supabase,
@@ -175,7 +186,7 @@ export const POST: APIRoute = async ({ request, url }) => {
   const { error: itemsErr } = await supabase.from('order_items').insert(itemsToInsert);
   if (itemsErr) {
     await supabase.from('orders').delete().eq('id', order.id);
-    return fail(itemsErr.message, 500);
+    return wrap(fail(itemsErr.message, 500));
   }
 
   // (5) Create Stripe Checkout Session.
@@ -250,7 +261,7 @@ export const POST: APIRoute = async ({ request, url }) => {
     await supabase.from('order_items').delete().eq('order_id', order.id);
     await supabase.from('orders').delete().eq('id', order.id);
     console.error('Stripe session creation failed', e);
-    return fail((e as Error).message || 'Payment session failed', 500);
+    return wrap(fail((e as Error).message || 'Payment session failed', 500));
   }
 
   const { error: updErr } = await supabase
@@ -262,10 +273,10 @@ export const POST: APIRoute = async ({ request, url }) => {
   }
 
   if (!session.url) {
-    return fail('Stripe did not return a session URL', 500);
+    return wrap(fail('Stripe did not return a session URL', 500));
   }
 
-  return ok({ redirect_to: session.url, order_number: order.order_number });
+  return wrap(ok({ redirect_to: session.url, order_number: order.order_number }));
 };
 
 function str(v: unknown): string {

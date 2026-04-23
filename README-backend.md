@@ -213,6 +213,34 @@ The bundled API key is a **test token** (`shippo_test_...`). Test tokens return 
 
 Edit the ship-from address and default package dimensions at **Admin → Settings → Shipping**. Set once — rates use this every time.
 
+### CORS (cross-origin storefront)
+
+The storefront is deployed as a separate Netlify site and calls this backend's public API from a different origin. Browsers require CORS headers on those responses.
+
+Set `PUBLIC_FRONTEND_ORIGINS` on the backend Netlify site (comma-separated, no trailing slashes):
+
+```
+PUBLIC_FRONTEND_ORIGINS=https://tacky-turquoise.netlify.app,https://tackyturquoise.com,https://www.tackyturquoise.com
+```
+
+- The backend reads this on boot, splits on commas, and uses it as an allowlist. If the request's `Origin` header matches, it's echoed back in `Access-Control-Allow-Origin`.
+- If the env var is **unset or empty**, no origin is allowed — browsers will block the call. That's the intended fail-closed behavior.
+- Preflight (`OPTIONS`) requests are handled on every public endpoint; admin routes and `/api/webhooks/stripe` deliberately do NOT have CORS.
+
+Add additional origins (preview branch URLs, staging domains, etc.) to the same env var — no code change required.
+
+Smoke test from the storefront's browser console:
+
+```js
+fetch('https://tack-turquoise-backend.netlify.app/api/cart/validate', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ product_ids: [] }),
+}).then(r => r.json()).then(console.log);
+```
+
+Should return `{ ok: true, data: { available: [], unavailable: [] } }` without a CORS error in the console.
+
 ### Flow summary
 
 1. Customer fills in the shipping address on `/checkout`; the form debounces and calls `/api/shipping/quote`.

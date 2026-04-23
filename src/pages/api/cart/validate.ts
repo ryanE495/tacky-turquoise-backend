@@ -5,15 +5,18 @@ import type { APIRoute } from 'astro';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { validateCart } from '~/lib/cart-validate';
 import { ok, fail } from '~/lib/api';
+import { handleOptions, withCors } from '~/lib/cors';
 
 export const prerender = false;
+
+export const OPTIONS: APIRoute = ({ request }) => handleOptions(request);
 
 export const POST: APIRoute = async ({ request }) => {
   let body: Record<string, unknown>;
   try {
     body = await request.json();
   } catch {
-    return fail('Invalid JSON body', 400);
+    return withCors(request, fail('Invalid JSON body', 400));
   }
 
   const ids = Array.isArray(body.product_ids)
@@ -22,8 +25,8 @@ export const POST: APIRoute = async ({ request }) => {
 
   try {
     const result = await validateCart(createSupabaseAdminClient(), ids);
-    return ok(result);
+    return withCors(request, ok(result));
   } catch (e) {
-    return fail((e as Error).message, 500);
+    return withCors(request, fail((e as Error).message, 500));
   }
 };

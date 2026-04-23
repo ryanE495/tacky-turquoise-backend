@@ -4,12 +4,17 @@ import type { APIRoute } from 'astro';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { publicImageUrl } from '~/lib/images';
 import { ok, fail } from '~/lib/api';
+import { handleOptions, withCors } from '~/lib/cors';
 
 export const prerender = false;
 
-export const GET: APIRoute = async ({ url }) => {
+export const OPTIONS: APIRoute = ({ request }) => handleOptions(request);
+
+export const GET: APIRoute = async ({ url, request }) => {
+  const wrap = (r: Response) => withCors(request, r);
+
   const orderNumber = url.searchParams.get('order')?.trim();
-  if (!orderNumber) return fail('Missing order query param', 400);
+  if (!orderNumber) return wrap(fail('Missing order query param', 400));
 
   const supabase = createSupabaseAdminClient();
   const { data: order, error } = await supabase
@@ -20,8 +25,8 @@ export const GET: APIRoute = async ({ url }) => {
     .eq('order_number', orderNumber)
     .maybeSingle();
 
-  if (error) return fail(error.message, 500);
-  if (!order) return fail('Order not found', 404);
+  if (error) return wrap(fail(error.message, 500));
+  if (!order) return wrap(fail('Order not found', 404));
 
   const { data: items } = await supabase
     .from('order_items')
@@ -47,7 +52,7 @@ export const GET: APIRoute = async ({ url }) => {
       : null,
   }));
 
-  return ok({
+  return wrap(ok({
     order_number: order.order_number,
     status: order.status,
     customer_email: order.customer_email,
@@ -67,5 +72,5 @@ export const GET: APIRoute = async ({ url }) => {
     tax_cents: order.tax_cents,
     total_cents: order.total_cents,
     created_at: order.created_at,
-  });
+  }));
 };

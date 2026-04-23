@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 import { createSupabaseServerClient } from '~/lib/supabase/server';
 import { publicImageUrl } from '~/lib/images';
 import { ok, fail } from '~/lib/api';
+import { handleOptions, withCors } from '~/lib/cors';
 
 export const prerender = false;
 
@@ -9,9 +10,12 @@ export const prerender = false;
 const PUBLIC_COLUMNS =
   'id, slug, piece_id, title, description, price_cents, length, meta_description, status, featured, published_at, created_at, sold_at, product_images(id, storage_path, alt_text, display_order)';
 
+export const OPTIONS: APIRoute = ({ request }) => handleOptions(request);
+
 export const GET: APIRoute = async ({ params, cookies, request }) => {
+  const wrap = (r: Response) => withCors(request, r);
   const slug = params.slug;
-  if (!slug) return fail('Missing slug', 400);
+  if (!slug) return wrap(fail('Missing slug', 400));
 
   const supabase = createSupabaseServerClient({ cookies, request });
 
@@ -22,8 +26,8 @@ export const GET: APIRoute = async ({ params, cookies, request }) => {
     .in('status', ['published', 'sold'])
     .maybeSingle();
 
-  if (error) return fail(error.message, 500);
-  if (!product) return fail('Not found', 404);
+  if (error) return wrap(fail(error.message, 500));
+  if (!product) return wrap(fail('Not found', 404));
 
   const images = ((product as any).product_images ?? [])
     .slice()
@@ -35,5 +39,5 @@ export const GET: APIRoute = async ({ params, cookies, request }) => {
     }));
 
   const { product_images, ...rest } = product as any;
-  return ok({ ...rest, images });
+  return wrap(ok({ ...rest, images }));
 };
