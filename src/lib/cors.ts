@@ -2,13 +2,31 @@
 // (separate Netlify site). Admin routes and the Stripe webhook do NOT use
 // this — they stay same-origin / signature-verified.
 //
-// Allowlist is driven by PUBLIC_FRONTEND_ORIGINS (comma-separated). If the
-// env var is unset, we fail closed — the browser will block the request.
+// Root cause of the earlier failure: `import.meta.env.PUBLIC_*` is handled
+// by Vite via static replacement at build time, not read at runtime. If the
+// env var wasn't present in the build environment (or the deploy happened
+// before the env var was added on Netlify), the compiled function ships
+// with the reference frozen to `undefined`. That meant the allowlist was
+// always empty and the Access-Control-Allow-Origin header was never
+// emitted, even though the dashboard had the value set.
+//
+// Fix: read `process.env.PUBLIC_FRONTEND_ORIGINS` at request time.
+// process.env is populated by the Netlify Functions runtime on every cold
+// start from the current dashboard env vars, so env changes take effect
+// on the next deploy without needing a code change. `import.meta.env`
+// remains a fallback so local `astro dev` keeps working from .env.
+//
+// Parsing happens per-request (the list is tiny; the cost is negligible).
 
-const allowedOrigins = (import.meta.env.PUBLIC_FRONTEND_ORIGINS ?? '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+function readAllowedOrigins(): string[] {
+  const raw =
+    (typeof process !== 'undefined' && process.env?.PUBLIC_FRONTEND_ORIGINS) ||
+    (import.meta.env.PUBLIC_FRONTEND_ORIGINS ?? '');
+  return String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export function getCorsHeaders(request: Request): Record<string, string> {
   const origin = request.headers.get('origin');
@@ -19,8 +37,15 @@ export function getCorsHeaders(request: Request): Record<string, string> {
     Vary: 'Origin',
   };
 
-  if (origin && allowedOrigins.includes(origin)) {
+  const allowed = readAllowedOrigins();
+  if (origin && allowed.includes(origin)) {
     headers['Access-Control-Allow-Origin'] = origin;
+  } else if (origin) {
+    // Visible in Netlify function logs so a misconfigured allowlist is easy
+    // to diagnose without rebuilding to change logging.
+    console.warn(
+      `[cors] blocking origin="${origin}" (allowlist=[${allowed.join(', ') || 'empty'}])`,
+    );
   }
 
   return headers;
