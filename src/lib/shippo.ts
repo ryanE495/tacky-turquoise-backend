@@ -5,13 +5,18 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 let _client: Shippo | null = null;
 
-function getClient(): Shippo {
+export function getShippoClient(): Shippo {
   if (_client) return _client;
-  const key = import.meta.env.SHIPPO_API_KEY;
+  const key =
+    (typeof process !== 'undefined' && process.env?.SHIPPO_API_KEY) ||
+    import.meta.env.SHIPPO_API_KEY;
   if (!key) throw new Error('SHIPPO_API_KEY is not set');
   _client = new Shippo({ apiKeyHeader: key });
   return _client;
 }
+
+// Kept as internal alias for backward-compat with existing callers in this file.
+const getClient = getShippoClient;
 
 export interface ShippingRate {
   rate_id: string;

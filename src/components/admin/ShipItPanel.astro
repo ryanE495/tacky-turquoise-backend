@@ -1,0 +1,455 @@
+---
+// Per-order shipping workflow. Renders one of three states based on the
+// order's current status + label_url:
+//   - can't ship (status !== 'paid'): informational only
+//   - ready to ship (status === 'paid', label_url null): rate picker + purchase
+//   - shipped (label_url set): tracking info + label PDF link
+import { formatPrice } from '~/lib/format';
+
+interface Props {
+  orderId: string;
+  status: string;
+  labelUrl: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  shippedAt: string | null;
+  labelCreatedAt: string | null;
+  originalServiceLevel: string | null;
+}
+
+const {
+  orderId,
+  status,
+  labelUrl,
+  trackingNumber,
+  trackingUrl,
+  shippedAt,
+  labelCreatedAt,
+  originalServiceLevel,
+} = Astro.props;
+
+function formatDate(iso: string | null | undefined) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+}
+
+// Determine initial render mode:
+//   'blocked'   — cannot ship in current status
+//   'ready'     — show rate picker
+//   'shipped'   — show tracking details
+let initialMode: 'blocked' | 'ready' | 'shipped';
+if (labelUrl) initialMode = 'shipped';
+else if (status === 'paid') initialMode = 'ready';
+else initialMode = 'blocked';
+---
+
+<section class="ship-panel panel">
+  <h2>Shipping</h2>
+
+  {
+    initialMode === 'blocked' && (
+      <p class="muted blocked">
+        This order can't be shipped yet. Current status:{' '}
+        <span class={`status-pill status-${status}`}>{status}</span>.
+      </p>
+    )
+  }
+
+  {
+    initialMode === 'ready' && (
+      <div
+        class="ship-ready"
+        data-order-id={orderId}
+        data-original-service={originalServiceLevel ?? ''}
+      >
+        <div class="flash" id="ship-flash" hidden></div>
+        <div id="rates-loading" class="muted loading">Fetching rates…</div>
+        <div id="rates-error" class="flash flash-error" hidden></div>
+        <form id="rates-form" hidden>
+          <fieldset>
+            <legend class="sr-only">Choose a shipping rate</legend>
+            <div id="rates-list" class="rates" role="radiogroup"></div>
+          </fieldset>
+          <button type="submit" class="btn-primary purchase-btn" id="purchase-btn" disabled>
+            Purchase label
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  {
+    initialMode === 'shipped' && (
+      <div class="ship-shipped" data-order-id={orderId}>
+        <div class="shipped-head">
+          <span class="status-pill status-shipped">Shipped</span>
+          <span class="muted shipped-date">
+            {formatDate(shippedAt || labelCreatedAt)}
+          </span>
+        </div>
+        <div class="tracking">
+          <div class="label muted">Tracking</div>
+          <div class="tracking-row">
+            <code class="tracking-number" id="tracking-number">
+              {trackingNumber ?? '—'}
+            </code>
+            {trackingNumber && (
+              <button
+                type="button"
+                class="btn copy-btn"
+                data-tracking={trackingNumber}
+                aria-label="Copy tracking number"
+              >
+                Copy
+              </button>
+            )}
+          </div>
+        </div>
+        <div class="links">
+          {trackingUrl && (
+            <a class="btn" href={trackingUrl} target="_blank" rel="noopener">
+              Track shipment
+            </a>
+          )}
+          {labelUrl && (
+            <a class="btn btn-primary" href={labelUrl} target="_blank" rel="noopener">
+              Download label PDF
+            </a>
+          )}
+        </div>
+      </div>
+    )
+  }
+</section>
+
+<script>
+  import { formatPrice } from '~/lib/format';
+
+  type Rate = {
+    rate_id: string;
+    provider: string;
+    service_level: string;
+    service_token: string;
+    amount_cents: number;
+    estimated_days: number | null;
+    duration_terms: string | null;
+  };
+
+  const container = document.querySelector('.ship-ready') as HTMLElement | null;
+
+  if (container) {
+    const orderId = container.dataset.orderId!;
+    const originalService = container.dataset.originalService || '';
+    const loading = document.getElementById('rates-loading') as HTMLElement;
+    const errorBox = document.getElementById('rates-error') as HTMLElement;
+    const form = document.getElementById('rates-form') as HTMLFormElement;
+    const list = document.getElementById('rates-list') as HTMLElement;
+    const purchaseBtn = document.getElementById('purchase-btn') as HTMLButtonElement;
+    const flash = document.getElementById('ship-flash') as HTMLElement;
+
+    let rates: Rate[] = [];
+
+    function escapeAttr(s: string): string {
+      return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function showError(msg: string) {
+      loading.hidden = true;
+      form.hidden = true;
+      errorBox.hidden = false;
+      errorBox.textContent = msg;
+    }
+    function showFlash(kind: 'success' | 'error', message: string) {
+      flash.hidden = false;
+      flash.className = `flash flash-${kind}`;
+      flash.textContent = message;
+    }
+
+    function pickDefaultRateId(rs: Rate[]): string | null {
+      if (rs.length === 0) return null;
+      if (originalService) {
+        const match = rs.find((r) => r.service_level === originalService);
+        if (match) return match.rate_id;
+      }
+      return rs[0].rate_id;
+    }
+
+    function renderRates(rs: Rate[]) {
+      if (rs.length === 0) {
+        showError('Shippo returned no rates for this order.');
+        return;
+      }
+      const defaultId = pickDefaultRateId(rs);
+      list.innerHTML = rs
+        .map((r) => {
+          const idSafe = `rate-${escapeAttr(r.rate_id)}`;
+          const duration = r.duration_terms
+            ? `<div class="duration muted">${escapeAttr(r.duration_terms)}</div>`
+            : '';
+          const days =
+            r.estimated_days != null ? `~${r.estimated_days} days` : '';
+          return `
+            <label class="rate-row" for="${idSafe}">
+              <input type="radio" name="rate" id="${idSafe}" value="${escapeAttr(r.rate_id)}" ${
+                r.rate_id === defaultId ? 'checked' : ''
+              } />
+              <div class="rate-meta">
+                <div class="rate-name">${escapeAttr(r.service_level)}</div>
+                <div class="rate-sub muted">${escapeAttr(r.provider)}${days ? ` · ${days}` : ''}</div>
+                ${duration}
+              </div>
+              <div class="rate-price">${formatPrice(r.amount_cents)}</div>
+            </label>
+          `;
+        })
+        .join('');
+      loading.hidden = true;
+      form.hidden = false;
+      purchaseBtn.disabled = !defaultId;
+    }
+
+    async function fetchRates() {
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}/shipping-rates`);
+        const json = await res.json();
+        if (!json.ok) {
+          showError(
+            typeof json.error === 'string'
+              ? json.error
+              : json.error?.message ?? "Couldn't fetch rates",
+          );
+          return;
+        }
+        rates = json.data.rates as Rate[];
+        renderRates(rates);
+      } catch (err) {
+        showError("Couldn't reach the server to fetch rates.");
+      }
+    }
+
+    list.addEventListener('change', () => {
+      const selected = list.querySelector<HTMLInputElement>('input[name="rate"]:checked');
+      purchaseBtn.disabled = !selected;
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const selected = list.querySelector<HTMLInputElement>('input[name="rate"]:checked');
+      if (!selected) return;
+      const rateId = selected.value;
+
+      purchaseBtn.disabled = true;
+      purchaseBtn.textContent = 'Purchasing…';
+      flash.hidden = true;
+
+      try {
+        const res = await fetch(`/api/admin/orders/${orderId}/purchase-label`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ rate_id: rateId }),
+        });
+        const json = await res.json();
+        if (!json.ok) {
+          const msg =
+            typeof json.error === 'string'
+              ? json.error
+              : json.error?.message ?? 'Label purchase failed';
+          const isStale = /expired|rate/i.test(msg);
+          showFlash(
+            'error',
+            isStale
+              ? 'Shipping rates expired. Please refresh and try again.'
+              : msg,
+          );
+          purchaseBtn.disabled = false;
+          purchaseBtn.textContent = 'Purchase label';
+          return;
+        }
+        // Success — reload so the page re-renders in the "shipped" state
+        // using the fresh label info.
+        window.location.reload();
+      } catch {
+        showFlash('error', 'Network error while purchasing label.');
+        purchaseBtn.disabled = false;
+        purchaseBtn.textContent = 'Purchase label';
+      }
+    });
+
+    fetchRates();
+  }
+
+  // Copy tracking number button (only present in the "shipped" state)
+  document.querySelectorAll<HTMLButtonElement>('.copy-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const val = btn.dataset.tracking || '';
+      try {
+        await navigator.clipboard.writeText(val);
+        const original = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => {
+          btn.textContent = original;
+        }, 1200);
+      } catch {
+        // noop — clipboard blocked
+      }
+    });
+  });
+</script>
+
+<style>
+  .ship-panel h2 {
+    margin: 0 0 0.75rem;
+    font-size: 1rem;
+  }
+  .blocked {
+    margin: 0;
+    font-size: 0.92rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+  .loading {
+    font-size: 0.9rem;
+    padding: 0.25rem 0;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  fieldset {
+    border: 0;
+    padding: 0;
+    margin: 0 0 0.9rem;
+  }
+  .rates {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .rate-row {
+    display: grid;
+    grid-template-columns: 22px 1fr auto;
+    gap: 0.6rem;
+    align-items: center;
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    background: #fbfaf6;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .rate-row:hover {
+    border-color: var(--accent);
+  }
+  .rate-row input[type='radio'] {
+    width: auto;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .rate-row:has(input:checked) {
+    border-color: var(--accent);
+    background: #f2efe6;
+  }
+  .rate-meta {
+    min-width: 0;
+  }
+  .rate-name {
+    font-weight: 600;
+    font-size: 0.94rem;
+  }
+  .rate-sub {
+    font-size: 0.8rem;
+    margin-top: 0.1rem;
+  }
+  .duration {
+    font-size: 0.78rem;
+    margin-top: 0.15rem;
+  }
+  .rate-price {
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+  .purchase-btn {
+    width: 100%;
+    padding: 0.7rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .shipped-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.9rem;
+  }
+  .shipped-date {
+    font-size: 0.82rem;
+  }
+  .tracking .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+  }
+  .tracking-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .tracking-number {
+    flex: 1;
+    background: #fbfaf6;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.4rem 0.55rem;
+    font-size: 0.88rem;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+  }
+  .copy-btn {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.82rem;
+  }
+  .links {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.9rem;
+  }
+  .links .btn {
+    width: 100%;
+    text-align: center;
+  }
+
+  .status-pill {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: capitalize;
+    color: #fff;
+  }
+  .status-pending { background: var(--amber); }
+  .status-paid { background: var(--green); }
+  .status-shipped { background: #4a6fa5; }
+  .status-delivered { background: var(--accent); }
+  .status-refunded { background: var(--muted); }
+  .status-cancelled { background: var(--gray); }
+  .status-failed { background: var(--danger); }
+</style>

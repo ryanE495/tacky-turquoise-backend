@@ -4,6 +4,9 @@ import type { APIRoute } from 'astro';
 import type Stripe from 'stripe';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { getStripe } from '~/lib/stripe';
+import { publicImageUrl } from '~/lib/images';
+import { sendEmail } from '~/lib/emails/send';
+import { orderConfirmationEmail } from '~/lib/emails/order-confirmation';
 
 export const prerender = false;
 
@@ -121,6 +124,75 @@ async function handleCheckoutCompleted(session: Stripe.Checkout.Session) {
       .neq('status', 'sold');
     if (prodErr) throw prodErr;
   }
+
+  // Order confirmation email. Must not fail the webhook — the order is
+  // already paid, and a webhook retry here would re-mark the products
+  // sold (no-op) and attempt another send (duplicate email).
+  try {
+    await sendOrderConfirmation(supabase, orderId);
+  } catch (err) {
+    console.error('Order confirmation email side effect failed', { orderId, err });
+  }
+}
+
+async function sendOrderConfirmation(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  orderId: string,
+): Promise<void> {
+  const { data: order } = await supabase
+    .from('orders')
+    .select(
+      'order_number, customer_name, customer_email, subtotal_cents, shipping_cents, tax_cents, total_cents, ship_to_name, ship_to_line1, ship_to_line2, ship_to_city, ship_to_state, ship_to_postal_code, ship_to_country',
+    )
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order || !order.customer_email) {
+    console.warn('Skipping order confirmation — missing order or email', { orderId });
+    return;
+  }
+
+  const { data: itemRows } = await supabase
+    .from('order_items')
+    .select('product_title, product_piece_id, price_cents, primary_image_path')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: true });
+
+  const items = (itemRows ?? []).map((it) => ({
+    title: it.product_title,
+    piece_id: it.product_piece_id,
+    price_cents: it.price_cents,
+    primary_image_url: it.primary_image_path
+      ? publicImageUrl(supabase, it.primary_image_path)
+      : null,
+  }));
+
+  const { subject, html, text } = orderConfirmationEmail({
+    order_number: order.order_number,
+    customer_name: order.customer_name,
+    items,
+    subtotal_cents: order.subtotal_cents,
+    shipping_cents: order.shipping_cents,
+    tax_cents: order.tax_cents,
+    total_cents: order.total_cents,
+    ship_to: {
+      name: order.ship_to_name,
+      line1: order.ship_to_line1,
+      line2: order.ship_to_line2,
+      city: order.ship_to_city,
+      state: order.ship_to_state,
+      postal_code: order.ship_to_postal_code,
+      country: order.ship_to_country,
+    },
+  });
+
+  await sendEmail(supabase, {
+    to: order.customer_email,
+    subject,
+    html,
+    text,
+    orderId,
+    emailType: 'order_confirmation',
+  });
 }
 
 async function handleCheckoutExpired(session: Stripe.Checkout.Session) {

@@ -241,6 +241,37 @@ fetch('https://tack-turquoise-backend.netlify.app/api/cart/validate', {
 
 Should return `{ ok: true, data: { available: [], unavailable: [] } }` without a CORS error in the console.
 
+### Shippo labels + Resend emails (phase 3)
+
+After payment, an admin visits `/admin/orders/[id]` and uses the **Shipping** panel to buy a USPS label and kick off fulfillment.
+
+Env vars to add on Netlify (backend site):
+
+```
+RESEND_API_KEY=re_...                # mark as secret
+EMAIL_FROM=orders@tackyturquoise.com
+EMAIL_FROM_NAME=Tacky Turquoise
+```
+
+Resend domain: `tackyturquoise.com` must be verified in the Resend dashboard. If that verification lapses, all sends will 403.
+
+Endpoints:
+
+- `GET /api/admin/orders/[id]/shipping-rates` — full list of rates from Shippo for the order's ship-to address (sorted cheapest first). Auth required.
+- `POST /api/admin/orders/[id]/purchase-label` — purchases the selected rate, writes tracking + label URL + `status='shipped'`, fires the shipping notification email. Body: `{ rate_id }`. Auth required.
+
+Emails:
+
+- **Order confirmation** — fires from the Stripe webhook on `checkout.session.completed`, once per order (guarded by the `status='pending'` → `'paid'` update that returns the updated row only on the real transition).
+- **Shipping notification** — fires from `purchaseLabel()` after the DB write succeeds.
+- Both sends are wrapped in try/catch — email failure never fails the primary operation. Every attempt is logged to the `email_log` table.
+
+Testing notes:
+
+- Shippo test labels are free; PDFs are watermarked "SHIPPO TEST LABEL".
+- Resend sends real email even in test usage — use an inbox you own.
+- If a label purchase succeeds in Shippo but the DB update fails, the function logs `[CRITICAL]` with `shippo_transaction_id` for manual reconciliation.
+
 ### Flow summary
 
 1. Customer fills in the shipping address on `/checkout`; the form debounces and calls `/api/shipping/quote`.

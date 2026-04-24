@@ -10,6 +10,9 @@ interface ImportMetaEnv {
   readonly STRIPE_WEBHOOK_SECRET?: string;
   readonly SHIPPO_API_KEY: string;
   readonly PUBLIC_FRONTEND_ORIGINS?: string;
+  readonly RESEND_API_KEY: string;
+  readonly EMAIL_FROM?: string;
+  readonly EMAIL_FROM_NAME?: string;
 }
 
 interface ImportMeta {

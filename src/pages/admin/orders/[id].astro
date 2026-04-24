@@ -1,5 +1,6 @@
 ---
 import AdminLayout from '~/layouts/AdminLayout.astro';
+import ShipItPanel from '~/components/admin/ShipItPanel.astro';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { publicImageUrl } from '~/lib/images';
 import { formatPrice } from '~/lib/format';
@@ -78,6 +79,17 @@ function formatDate(iso: string | null | undefined) {
     </section>
 
     <aside class="side">
+      <ShipItPanel
+        orderId={order.id}
+        status={order.status}
+        labelUrl={order.label_url ?? null}
+        trackingNumber={order.tracking_number ?? null}
+        trackingUrl={order.tracking_url ?? null}
+        shippedAt={order.shipped_at ?? null}
+        labelCreatedAt={order.label_created_at ?? null}
+        originalServiceLevel={order.shipping_service_level ?? null}
+      />
+
       <section class="panel">
         <h2>Customer</h2>
         <div><strong>{order.customer_name}</strong></div>
