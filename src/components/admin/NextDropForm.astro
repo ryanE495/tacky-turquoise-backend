@@ -1,0 +1,206 @@
+---
+interface Settings {
+  enabled: boolean;
+  name: string | null;
+  drops_at: string | null;
+  location: string | null;
+  shop_url: string | null;
+}
+
+interface Props {
+  settings: Settings;
+}
+
+const { settings } = Astro.props;
+
+// Convert ISO timestamp (UTC) into the value an <input type="datetime-local">
+// expects: YYYY-MM-DDTHH:MM in the *local* time of whoever is editing. We do
+// the conversion client-side via a hidden ISO field so the rendered value
+// reflects the admin's machine clock. Server stays UTC throughout.
+const initialIso = settings.drops_at ?? '';
+---
+
+<form id="next-drop-form" data-initial-iso={initialIso}>
+  <div class="flash" id="form-flash" hidden></div>
+
+  <fieldset>
+    <legend>Banner</legend>
+    <div class="form-grid">
+      <div class="full">
+        <label class="checkbox">
+          <input type="checkbox" id="enabled" name="enabled" checked={settings.enabled} />
+          <span>Show "Next drop" banner on the storefront</span>
+        </label>
+        <div class="hint muted">Turn off after a drop ends, then update the date for the next one and turn it back on.</div>
+      </div>
+
+      <div class="full">
+        <label for="name">Drop name</label>
+        <input
+          id="name"
+          name="name"
+          placeholder={`Spring Drop ’26`}
+          value={settings.name ?? ''}
+        />
+        <div class="hint muted">Shown in the small line above the headline (e.g. "Spring Drop '26").</div>
+      </div>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>When + where</legend>
+    <div class="form-grid">
+      <div class="full">
+        <label for="drops_at_local">Date and time</label>
+        <input
+          id="drops_at_local"
+          type="datetime-local"
+          step="60"
+          required
+        />
+        <div class="hint muted">
+          Enter the moment the drop goes live in your local time. We store it in UTC and the
+          storefront displays it in each visitor's own zone.
+        </div>
+      </div>
+
+      <div class="full">
+        <label for="location">Location</label>
+        <input
+          id="location"
+          name="location"
+          placeholder="Montrose, Colorado"
+          value={settings.location ?? ''}
+        />
+      </div>
+
+      <div class="full">
+        <label for="shop_url">"Shop the drop" link</label>
+        <input
+          id="shop_url"
+          name="shop_url"
+          placeholder="/shop"
+          value={settings.shop_url ?? ''}
+        />
+        <div class="hint muted">Where the button on the banner takes visitors. Default <code>/shop</code>.</div>
+      </div>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <button type="submit" class="btn-primary" id="submit-btn">Save drop settings</button>
+  </div>
+</form>
+
+<script>
+  const form = document.getElementById('next-drop-form') as HTMLFormElement;
+  const flash = document.getElementById('form-flash') as HTMLElement;
+  const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+  const enabledEl = document.getElementById('enabled') as HTMLInputElement;
+  const nameEl = document.getElementById('name') as HTMLInputElement;
+  const localEl = document.getElementById('drops_at_local') as HTMLInputElement;
+  const locationEl = document.getElementById('location') as HTMLInputElement;
+  const shopUrlEl = document.getElementById('shop_url') as HTMLInputElement;
+
+  // Hydrate the local datetime field from the stored ISO timestamp.
+  const initialIso = form.dataset.initialIso || '';
+  if (initialIso) {
+    const d = new Date(initialIso);
+    if (!Number.isNaN(d.getTime())) {
+      const pad = (n: number) => String(n).padStart(2, '0');
+      const local = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+      localEl.value = local;
+    }
+  }
+
+  function showFlash(kind: 'success' | 'error', message: string) {
+    flash.hidden = false;
+    flash.className = `flash flash-${kind}`;
+    flash.textContent = message;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    flash.hidden = true;
+    submitBtn.disabled = true;
+
+    let dropsAtIso: string | null = null;
+    if (localEl.value) {
+      // datetime-local doesn't carry a timezone — interpret as local time.
+      const local = new Date(localEl.value);
+      if (Number.isNaN(local.getTime())) {
+        showFlash('error', 'Date and time is invalid.');
+        submitBtn.disabled = false;
+        return;
+      }
+      dropsAtIso = local.toISOString();
+    }
+
+    const body = {
+      enabled: enabledEl.checked,
+      name: nameEl.value.trim() || null,
+      drops_at: dropsAtIso,
+      location: locationEl.value.trim() || null,
+      shop_url: shopUrlEl.value.trim() || null,
+    };
+
+    try {
+      const res = await fetch('/api/admin/next-drop', {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        showFlash('error', json.error || 'Save failed');
+      } else {
+        showFlash('success', 'Saved');
+      }
+    } catch {
+      showFlash('error', 'Network error');
+    }
+    submitBtn.disabled = false;
+  });
+</script>
+
+<style>
+  form {
+    max-width: 680px;
+  }
+  fieldset {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem 1.1rem 1.25rem;
+    margin: 0 0 1rem;
+    background: var(--panel);
+  }
+  legend {
+    padding: 0 0.4rem;
+    font-weight: 600;
+  }
+  .checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .checkbox input {
+    width: auto;
+    margin: 0;
+  }
+  .hint {
+    font-size: 0.82rem;
+    margin-top: 0.3rem;
+  }
+  .hint code {
+    background: var(--muted-bg);
+    padding: 0.05rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .actions {
+    margin-top: 1.5rem;
+  }
+</style>
