@@ -140,6 +140,33 @@ function formatDate(iso: string) {
       renderBar();
     });
 
+    type SkippedItem = {
+      id: string;
+      title: string | null;
+      reason: string;
+      order_numbers?: string[];
+    };
+    type DeleteResponse = {
+      deleted_count: number;
+      skipped: SkippedItem[];
+      deleted_orders?: string[];
+      associated_order_numbers?: string[];
+    };
+
+    async function callBulkDelete(
+      ids: string[],
+      forceDeleteOrders: boolean,
+    ): Promise<{ ok: true; data: DeleteResponse } | { ok: false; error: string }> {
+      const res = await fetch('/api/admin/products/bulk-delete', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ ids, force_delete_orders: forceDeleteOrders }),
+      });
+      const json = await res.json();
+      if (!json?.ok) return { ok: false, error: json?.error || 'Bulk delete failed.' };
+      return { ok: true, data: json.data as DeleteResponse };
+    }
+
     deleteBtn.addEventListener('click', async () => {
       const ids = selectedIds();
       if (ids.length === 0) return;
@@ -156,38 +183,70 @@ function formatDate(iso: string) {
       const originalLabel = deleteBtn.textContent;
       deleteBtn.textContent = 'Deleting…';
 
-      try {
-        const res = await fetch('/api/admin/products/bulk-delete', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ids }),
-        });
-        const json = await res.json();
-        if (!json?.ok) {
-          alert(json?.error || 'Bulk delete failed.');
-          deleteBtn.disabled = false;
-          clearBtn.disabled = false;
-          deleteBtn.textContent = originalLabel;
-          return;
-        }
-        const skipped = (json.data.skipped ?? []) as Array<{
-          title: string | null;
-          reason: string;
-        }>;
-        if (skipped.length > 0) {
-          const lines = skipped
-            .map((s) => `• ${s.title ?? 'untitled'} (${s.reason})`)
-            .join('\n');
-          alert(
-            `Deleted ${json.data.deleted_count}. Skipped ${skipped.length}:\n${lines}`,
-          );
-        }
-        window.location.reload();
-      } catch (err) {
-        alert('Network error during bulk delete.');
+      const restoreButtons = () => {
         deleteBtn.disabled = false;
         clearBtn.disabled = false;
         deleteBtn.textContent = originalLabel;
+      };
+
+      try {
+        const first = await callBulkDelete(ids, false);
+        if (!first.ok) {
+          alert(first.error);
+          restoreButtons();
+          return;
+        }
+        let { deleted_count, skipped, associated_order_numbers, deleted_orders } = first.data;
+
+        // If everything (or some products) got skipped because they're tied
+        // to orders, offer to wipe those orders too and retry.
+        if (skipped.length > 0 && skipped.every((s) => s.reason === 'in_order')) {
+          const orderNumbers = (associated_order_numbers ?? []).filter(Boolean);
+          const orderList =
+            orderNumbers.length > 0
+              ? `\n\nOrders that would be deleted: ${orderNumbers.join(', ')}`
+              : '';
+          const wipeOrders = confirm(
+            `${skipped.length} product${skipped.length === 1 ? '' : 's'} ${skipped.length === 1 ? 'is' : 'are'} attached to ${orderNumbers.length} test order${orderNumbers.length === 1 ? '' : 's'}.\n\nDelete those orders too so the products can be cleared?${orderList}\n\nThis cannot be undone.`,
+          );
+          if (wipeOrders) {
+            deleteBtn.textContent = 'Deleting orders + products…';
+            const second = await callBulkDelete(ids, true);
+            if (!second.ok) {
+              alert(second.error);
+              restoreButtons();
+              return;
+            }
+            deleted_count += second.data.deleted_count;
+            skipped = second.data.skipped;
+            deleted_orders = second.data.deleted_orders ?? deleted_orders;
+          }
+        }
+
+        const summaryLines: string[] = [];
+        summaryLines.push(`Deleted ${deleted_count} product${deleted_count === 1 ? '' : 's'}.`);
+        if (deleted_orders && deleted_orders.length > 0) {
+          summaryLines.push(`Deleted ${deleted_orders.length} order${deleted_orders.length === 1 ? '' : 's'}: ${deleted_orders.join(', ')}.`);
+        }
+        if (skipped.length > 0) {
+          summaryLines.push(
+            `Skipped ${skipped.length}: ${skipped.map((s) => `${s.title ?? 'untitled'} (${s.reason})`).join(', ')}`,
+          );
+        }
+        if (deleted_count > 0 || (deleted_orders && deleted_orders.length > 0)) {
+          // Only alert when there's something to surface beyond the obvious;
+          // the reload will speak for itself otherwise.
+          if (skipped.length > 0 || (deleted_orders?.length ?? 0) > 0) {
+            alert(summaryLines.join('\n'));
+          }
+          window.location.reload();
+        } else {
+          alert(summaryLines.join('\n'));
+          restoreButtons();
+        }
+      } catch (err) {
+        alert('Network error during bulk delete.');
+        restoreButtons();
       }
     });
   }
