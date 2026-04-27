@@ -34,39 +34,247 @@ function formatDate(iso: string) {
   products.length === 0 ? (
     <div class="empty panel">No products yet. Create your first one.</div>
   ) : (
-    <div class="grid">
+    <div class="grid" id="product-grid">
       {products.map((p) => (
-        <a class="card" href={`/admin/products/${p.id}/edit`}>
-          <div class="thumb">
-            {p.primary_image_url ? (
-              <img src={p.primary_image_url} alt="" loading="lazy" />
-            ) : (
-              <div class="thumb-empty">no image</div>
-            )}
-            <div class="overlays">
-              {p.piece_id && <span class="piece-id">{p.piece_id}</span>}
-              {p.featured && (
-                <span class="featured-tag" title="Featured on homepage">
-                  ★
-                </span>
+        <div class="card-wrap" data-id={p.id} data-title={p.title}>
+          <a class="card" href={`/admin/products/${p.id}/edit`}>
+            <div class="thumb">
+              {p.primary_image_url ? (
+                <img src={p.primary_image_url} alt="" loading="lazy" />
+              ) : (
+                <div class="thumb-empty">no image</div>
               )}
+              <div class="overlays">
+                {p.piece_id && <span class="piece-id">{p.piece_id}</span>}
+                {p.featured && (
+                  <span class="featured-tag" title="Featured on homepage">
+                    ★
+                  </span>
+                )}
+              </div>
             </div>
-          </div>
-          <div class="body">
-            <div class="title">{p.title}</div>
-            <div class="meta-row">
-              <span class="price">{formatPrice(p.price_cents)}</span>
-              <span class={`badge badge-${p.status}`}>{p.status}</span>
+            <div class="body">
+              <div class="title">{p.title}</div>
+              <div class="meta-row">
+                <span class="price">{formatPrice(p.price_cents)}</span>
+                <span class={`badge badge-${p.status}`}>{p.status}</span>
+              </div>
+              <div class="slug muted">
+                /{p.slug} · {formatDate(p.created_at)}
+              </div>
             </div>
-            <div class="slug muted">
-              /{p.slug} · {formatDate(p.created_at)}
-            </div>
-          </div>
-        </a>
+          </a>
+          <label class="select" aria-label={`Select ${p.title}`}>
+            <input type="checkbox" class="select-checkbox" data-id={p.id} />
+            <span class="select-box" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 8.5l3 3 7-7" />
+              </svg>
+            </span>
+          </label>
+        </div>
       ))}
     </div>
   )
 }
+
+<div class="bulk-bar" id="bulk-bar" hidden>
+  <div class="bulk-bar-inner">
+    <span class="count" id="bulk-count">0 selected</span>
+    <button type="button" class="btn" id="bulk-clear">Clear</button>
+    <button type="button" class="btn btn-danger" id="bulk-delete">Delete selected</button>
+  </div>
+</div>
+
+<script>
+  const grid = document.getElementById('product-grid');
+  if (grid) {
+    const bar = document.getElementById('bulk-bar') as HTMLElement;
+    const countEl = document.getElementById('bulk-count') as HTMLElement;
+    const clearBtn = document.getElementById('bulk-clear') as HTMLButtonElement;
+    const deleteBtn = document.getElementById('bulk-delete') as HTMLButtonElement;
+
+    function selectedIds(): string[] {
+      return Array.from(
+        grid!.querySelectorAll<HTMLInputElement>('.select-checkbox:checked'),
+      ).map((c) => c.dataset.id || '');
+    }
+
+    function selectedTitles(): string[] {
+      return Array.from(
+        grid!.querySelectorAll<HTMLInputElement>('.select-checkbox:checked'),
+      )
+        .map((c) => {
+          const wrap = c.closest('.card-wrap') as HTMLElement | null;
+          return wrap?.dataset.title || '';
+        })
+        .filter(Boolean);
+    }
+
+    function renderBar() {
+      const ids = selectedIds();
+      if (ids.length === 0) {
+        bar.hidden = true;
+        return;
+      }
+      bar.hidden = false;
+      countEl.textContent = `${ids.length} selected`;
+    }
+
+    grid.addEventListener('change', (e) => {
+      const target = e.target as HTMLElement;
+      if (target.matches?.('.select-checkbox')) {
+        const wrap = target.closest('.card-wrap');
+        if (wrap) wrap.classList.toggle('selected', (target as HTMLInputElement).checked);
+        renderBar();
+      }
+    });
+
+    clearBtn.addEventListener('click', () => {
+      grid
+        .querySelectorAll<HTMLInputElement>('.select-checkbox:checked')
+        .forEach((c) => {
+          c.checked = false;
+          c.closest('.card-wrap')?.classList.remove('selected');
+        });
+      renderBar();
+    });
+
+    deleteBtn.addEventListener('click', async () => {
+      const ids = selectedIds();
+      if (ids.length === 0) return;
+      const titles = selectedTitles().slice(0, 4).join(', ');
+      const more = ids.length > 4 ? ` and ${ids.length - 4} more` : '';
+      const summary = titles ? `${titles}${more}` : '';
+      const confirmed = confirm(
+        `Permanently delete ${ids.length} product${ids.length === 1 ? '' : 's'}?\n\n${summary}\n\nThis removes their images from storage and cannot be undone.`,
+      );
+      if (!confirmed) return;
+
+      deleteBtn.disabled = true;
+      clearBtn.disabled = true;
+      const originalLabel = deleteBtn.textContent;
+      deleteBtn.textContent = 'Deleting…';
+
+      try {
+        const res = await fetch('/api/admin/products/bulk-delete', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ids }),
+        });
+        const json = await res.json();
+        if (!json?.ok) {
+          alert(json?.error || 'Bulk delete failed.');
+          deleteBtn.disabled = false;
+          clearBtn.disabled = false;
+          deleteBtn.textContent = originalLabel;
+          return;
+        }
+        const skipped = (json.data.skipped ?? []) as Array<{
+          title: string | null;
+          reason: string;
+        }>;
+        if (skipped.length > 0) {
+          const lines = skipped
+            .map((s) => `• ${s.title ?? 'untitled'} (${s.reason})`)
+            .join('\n');
+          alert(
+            `Deleted ${json.data.deleted_count}. Skipped ${skipped.length}:\n${lines}`,
+          );
+        }
+        window.location.reload();
+      } catch (err) {
+        alert('Network error during bulk delete.');
+        deleteBtn.disabled = false;
+        clearBtn.disabled = false;
+        deleteBtn.textContent = originalLabel;
+      }
+    });
+  }
+</script>
+
+<style>
+  .card-wrap {
+    position: relative;
+    min-width: 0;
+  }
+  .card-wrap.selected .card {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(31, 111, 106, 0.15);
+  }
+  .select {
+    position: absolute;
+    top: 0.55rem;
+    right: 0.55rem;
+    z-index: 2;
+    cursor: pointer;
+    width: 26px;
+    height: 26px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .select input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+  }
+  .select-box {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: transparent;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .card-wrap:hover .select-box,
+  .select input:focus-visible + .select-box {
+    border-color: var(--accent);
+  }
+  .select input:checked + .select-box {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  .bulk-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 1.25rem;
+    transform: translateX(-50%);
+    z-index: 25;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.5rem 0.6rem 0.5rem 1.1rem;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+    max-width: calc(100vw - 1.5rem);
+  }
+  .bulk-bar-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: nowrap;
+  }
+  .bulk-bar .count {
+    font-weight: 600;
+    font-size: 0.92rem;
+    white-space: nowrap;
+  }
+  .bulk-bar .btn {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.88rem;
+  }
+</style>
 
 <style>
   .empty {
