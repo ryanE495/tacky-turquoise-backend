@@ -56,14 +56,14 @@ const initialJson = JSON.stringify(slots);
 
   <p class="helper muted">
     Main image shows in product cards. All 5 images appear on the product detail page. JPG,
-    PNG, or WebP. 10MB max each.
+    PNG, or WebP. 50MB max each.
   </p>
 </div>
 
 <script>
   type SlotData = { slot_index: number; storage_path: string | null; url: string | null };
 
-  const MAX_BYTES = 10 * 1024 * 1024;
+  const MAX_BYTES = 50 * 1024 * 1024;
 
   const root = document.querySelector('.image-slots') as HTMLElement;
   const flash = document.getElementById('slots-flash') as HTMLElement;
@@ -154,32 +154,69 @@ const initialJson = JSON.stringify(slots);
       return;
     }
     if (file.size > MAX_BYTES) {
-      showFlash('error', `${file.name}: exceeds 10MB`);
+      showFlash('error', `${file.name}: exceeds 50MB`);
       return;
     }
 
     const slotEl = root.querySelector<HTMLElement>(`.slot[data-slot="${slotIndex}"]`);
     slotEl?.classList.add('uploading');
 
+    // Two-step upload that bypasses the Netlify Functions ~6 MB body limit:
+    //   (1) ask the backend to mint a short-lived signed URL
+    //   (2) PUT the file straight to Supabase Storage at that URL
+    //   (3) for existing products, hit the commit endpoint to upsert the
+    //       product_images row. Drafts skip step 3 — the storage_path is
+    //       sent later as part of the create-product payload.
     try {
+      const signEndpoint =
+        mode === 'draft'
+          ? '/api/admin/products/draft-upload-sign'
+          : `/api/admin/products/${productId}/images/sign`;
+      const signBody =
+        mode === 'draft'
+          ? {
+              product_id: productId,
+              slot_index: slotIndex,
+              filename: file.name,
+              content_type: file.type,
+            }
+          : {
+              slot_index: slotIndex,
+              filename: file.name,
+              content_type: file.type,
+            };
+
+      const signRes = await fetch(signEndpoint, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(signBody),
+      });
+      const signJson = await signRes.json();
+      if (!signJson?.ok) throw new Error(signJson?.error || 'Sign failed');
+
+      const signed = signJson.data;
+      const putRes = await fetch(signed.signed_url, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'x-upsert': 'false',
+        },
+        body: file,
+      });
+      if (!putRes.ok) {
+        const text = await putRes.text().catch(() => '');
+        throw new Error(`Storage upload failed (${putRes.status}) ${text.slice(0, 120)}`);
+      }
+
       if (mode === 'draft') {
         const prev = state[slotIndex].storage_path;
-        const fd = new FormData();
-        fd.append('product_id', productId);
-        fd.append('slot_index', String(slotIndex));
-        fd.append('file', file);
-        const res = await fetch('/api/admin/products/draft-upload', {
-          method: 'POST',
-          body: fd,
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'Upload failed');
         state[slotIndex] = {
           slot_index: slotIndex,
-          storage_path: json.data.storage_path,
-          url: json.data.public_url,
+          storage_path: signed.storage_path,
+          url: signed.public_url,
         };
         renderSlot(slotIndex);
+        // Best-effort cleanup of an orphan from a quick re-upload.
         if (prev) {
           fetch('/api/admin/products/draft-upload', {
             method: 'DELETE',
@@ -188,19 +225,25 @@ const initialJson = JSON.stringify(slots);
           }).catch(() => {});
         }
       } else {
-        const fd = new FormData();
-        fd.append('slot_index', String(slotIndex));
-        fd.append('file', file);
-        const res = await fetch(`/api/admin/products/${productId}/images`, {
-          method: 'POST',
-          body: fd,
-        });
-        const json = await res.json();
-        if (!json.ok) throw new Error(json.error || 'Upload failed');
+        const commitRes = await fetch(
+          `/api/admin/products/${productId}/images/commit`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              slot_index: slotIndex,
+              storage_path: signed.storage_path,
+            }),
+          },
+        );
+        const commitJson = await commitRes.json();
+        if (!commitJson?.ok) {
+          throw new Error(commitJson?.error || 'Save image record failed');
+        }
         state[slotIndex] = {
           slot_index: slotIndex,
-          storage_path: json.data.storage_path,
-          url: json.data.url,
+          storage_path: commitJson.data.storage_path,
+          url: commitJson.data.url,
         };
         renderSlot(slotIndex);
       }
