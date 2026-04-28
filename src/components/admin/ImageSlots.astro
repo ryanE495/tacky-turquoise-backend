@@ -107,19 +107,34 @@ const initialJson = JSON.stringify(slots);
       img.alt = '';
       el.appendChild(img);
 
-      // Hover/touch overlay covers the whole image with a "Replace image"
-      // hint so the affordance is unmissable. The whole slot is also
-      // clickable for replace; the × button is the only carve-out.
-      const overlay = document.createElement('div');
-      overlay.className = 'slot-overlay';
-      overlay.innerHTML = `
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      // Always-visible corner pill so the affordance is obvious without
+      // needing to hover. The whole slot is clickable for replace; the
+      // × button is the only carve-out.
+      const cornerHint = document.createElement('div');
+      cornerHint.className = 'slot-corner-hint';
+      cornerHint.innerHTML = `
+        <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M3 7l4-4 4 4" />
           <path d="M7 3v10a4 4 0 0 0 4 4h2" />
           <path d="M21 17l-4 4-4-4" />
           <path d="M17 21V11a4 4 0 0 0-4-4h-2" />
         </svg>
-        <span>Replace image</span>
+        <span>Replace</span>
+      `;
+      el.appendChild(cornerHint);
+
+      // Bigger hover overlay covers the whole image — only on devices
+      // that actually support hover (no false trigger on tap-and-hold).
+      const overlay = document.createElement('div');
+      overlay.className = 'slot-overlay';
+      overlay.innerHTML = `
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M3 7l4-4 4 4" />
+          <path d="M7 3v10a4 4 0 0 0 4 4h2" />
+          <path d="M21 17l-4 4-4-4" />
+          <path d="M17 21V11a4 4 0 0 0-4-4h-2" />
+        </svg>
+        <span>Click to replace</span>
       `;
       el.appendChild(overlay);
 
@@ -430,47 +445,57 @@ const initialJson = JSON.stringify(slots);
     top: 6px;
     right: 6px;
     font-size: 16px;
-    z-index: 2;
+    z-index: 4;
   }
 
+  /* Always-visible "Replace" pill. Sits in the bottom-left so it doesn't
+     collide with the × delete button (top-right) or the "Primary" tag
+     used elsewhere. Explicit z-index so the absolute children always
+     stack above the static <img>. */
+  .slot-corner-hint {
+    position: absolute;
+    bottom: 6px;
+    left: 6px;
+    z-index: 3;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.22rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(0, 0, 0, 0.62);
+    color: #fff;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+  }
+
+  /* Bigger hover overlay only on real hover-capable pointers — touch
+     devices already have the corner pill. */
   .slot-overlay {
     position: absolute;
     inset: 0;
+    z-index: 2;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     gap: 0.35rem;
     color: #fff;
-    font-size: 0.85rem;
+    font-size: 0.88rem;
     font-weight: 600;
     background: rgba(0, 0, 0, 0.55);
     opacity: 0;
     transition: opacity 0.15s;
     pointer-events: none;
   }
-  .slot.filled:hover .slot-overlay {
-    opacity: 1;
-  }
-  @media (hover: none) {
-    /* Touch devices have no hover; keep a subtler always-on hint so the
-       affordance is still visible without overpowering the photo. */
-    .slot-overlay {
-      opacity: 0;
+  @media (hover: hover) {
+    .slot.filled:hover .slot-overlay {
+      opacity: 1;
     }
-    .slot.filled::after {
-      content: 'Tap to replace';
-      position: absolute;
-      bottom: 6px;
-      left: 6px;
-      padding: 0.18rem 0.45rem;
-      border-radius: 999px;
-      background: rgba(0, 0, 0, 0.55);
-      color: #fff;
-      font-size: 0.68rem;
-      font-weight: 600;
-      letter-spacing: 0.04em;
-      pointer-events: none;
+    .slot.filled:hover .slot-corner-hint {
+      opacity: 0;
     }
   }
 
