@@ -29,7 +29,10 @@ if (Astro.request.method === 'POST') {
     if (signInErr) {
       error = signInErr.message;
     } else {
-      return Astro.redirect(next);
+      // 303 ensures browsers GET the redirect target after a POST. The
+      // queued auth cookies set by Supabase via setAll() are attached to
+      // this response by Astro automatically.
+      return Astro.redirect(next, 303);
     }
   }
 }
@@ -133,12 +136,12 @@ if (Astro.request.method === 'POST') {
 
       {error && <div class="flash flash-error">{error}</div>}
 
-      <form method="post">
+      <form method="post" id="signin-form">
         <label for="email">Email</label>
         <input id="email" name="email" type="email" required autocomplete="username" />
         <label for="password">Password</label>
         <input id="password" name="password" type="password" required autocomplete="current-password" />
-        <button type="submit">Sign in</button>
+        <button type="submit" id="signin-btn">Sign in</button>
       </form>
 
       <button type="button" class="text-link" id="toggle-forgot">Forgot password?</button>
@@ -158,6 +161,15 @@ if (Astro.request.method === 'POST') {
 
     <script>
       import { createBrowserClient } from '@supabase/ssr';
+
+      // Disable the sign-in button on submit so a slow signin doesn't
+      // invite double-clicks that race the cookie write.
+      const signinForm = document.getElementById('signin-form') as HTMLFormElement;
+      const signinBtn = document.getElementById('signin-btn') as HTMLButtonElement;
+      signinForm.addEventListener('submit', () => {
+        signinBtn.disabled = true;
+        signinBtn.textContent = 'Signing in…';
+      });
 
       const supabase = createBrowserClient(
         import.meta.env.PUBLIC_SUPABASE_URL,
