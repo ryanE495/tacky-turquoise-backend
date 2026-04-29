@@ -1,11 +1,37 @@
 ---
-// DEV MODE: any submission redirects into the dashboard. No real auth.
-// Forgot-password flow below uses the real Supabase browser client and works
-// independently of the dev bypass — it'll actually send a real reset email.
+import { createSupabaseServerClient } from '~/lib/supabase/server';
+
 export const prerender = false;
 
+const supabase = createSupabaseServerClient({
+  cookies: Astro.cookies,
+  request: Astro.request,
+});
+const { data: existing } = await supabase.auth.getUser();
+
+const next = Astro.url.searchParams.get('next') || '/admin';
+
+if (existing.user) {
+  return Astro.redirect(next);
+}
+
+let error: string | null = null;
+
 if (Astro.request.method === 'POST') {
-  return Astro.redirect(Astro.url.searchParams.get('next') || '/admin');
+  const form = await Astro.request.formData();
+  const email = String(form.get('email') ?? '').trim();
+  const password = String(form.get('password') ?? '');
+
+  if (!email || !password) {
+    error = 'Email and password are required';
+  } else {
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInErr) {
+      error = signInErr.message;
+    } else {
+      return Astro.redirect(next);
+    }
+  }
 }
 ---
 
@@ -14,7 +40,8 @@ if (Astro.request.method === 'POST') {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Admin Login (dev)</title>
+    <meta name="robots" content="noindex,nofollow" />
+    <title>Admin Login</title>
     <style>
       body {
         margin: 0;
@@ -37,15 +64,6 @@ if (Astro.request.method === 'POST') {
       }
       h1 { margin: 0 0 0.25rem; font-size: 1.4rem; }
       .muted { color: #6b6b6b; }
-      .dev-note {
-        background: #fff8e1;
-        border: 1px solid #f2d37b;
-        color: #5a4400;
-        padding: 0.55rem 0.7rem;
-        border-radius: 6px;
-        margin: 1rem 0;
-        font-size: 0.9rem;
-      }
       label { display: block; margin-top: 1rem; font-weight: 600; font-size: 0.92rem; }
       input {
         width: 100%;
@@ -53,6 +71,7 @@ if (Astro.request.method === 'POST') {
         border: 1px solid #e2ded4;
         border-radius: 6px;
         font: inherit;
+        font-size: 16px;
         margin-top: 0.3rem;
         box-sizing: border-box;
       }
@@ -84,9 +103,9 @@ if (Astro.request.method === 'POST') {
       }
       .text-link:hover { background: transparent; text-decoration: underline; }
       .flash {
-        margin-top: 0.8rem;
         padding: 0.55rem 0.75rem;
         border-radius: 6px;
+        margin: 0.8rem 0 0;
         font-size: 0.9rem;
       }
       .flash-error {
@@ -111,12 +130,14 @@ if (Astro.request.method === 'POST') {
     <div class="panel">
       <h1>Admin Login</h1>
       <p class="muted">Sign in to manage products.</p>
-      <div class="dev-note">Dev mode — any email/password (or blank) will log you in.</div>
+
+      {error && <div class="flash flash-error">{error}</div>}
+
       <form method="post">
         <label for="email">Email</label>
-        <input id="email" name="email" type="text" autocomplete="off" />
+        <input id="email" name="email" type="email" required autocomplete="username" />
         <label for="password">Password</label>
-        <input id="password" name="password" type="password" autocomplete="off" />
+        <input id="password" name="password" type="password" required autocomplete="current-password" />
         <button type="submit">Sign in</button>
       </form>
 
