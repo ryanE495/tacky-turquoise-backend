@@ -13,7 +13,6 @@ const { data: rows } = await supabase
     'id, slug, piece_id, title, price_cents, length, status, published_at, created_at, product_images(storage_path, display_order)',
   )
   .eq('status', 'published')
-  .eq('silver_jewelry', false)
   .order('published_at', { ascending: false, nullsFirst: false })
   .order('created_at', { ascending: false });
 
