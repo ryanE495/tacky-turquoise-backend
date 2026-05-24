@@ -13,7 +13,7 @@ const { data: rows } = await supabase
     'id, slug, piece_id, title, price_cents, length, status, published_at, created_at, product_images(storage_path, display_order)',
   )
   .eq('status', 'published')
-  .eq('silver_jewelry', false)
+  .eq('silver_jewelry', true)
   .order('published_at', { ascending: false, nullsFirst: false })
   .order('created_at', { ascending: false });
 
@@ -31,15 +31,15 @@ const products = (rows ?? []).map((p) => {
 });
 ---
 
-<SiteLayout title="Shop · Tacky Turquoise">
+<SiteLayout title="Silver · Tacky Turquoise">
   <div class="shop-head">
-    <h1>Shop</h1>
-    <p class="muted">One-of-a-kind beaded turquoise necklaces. When it's gone, it's gone.</p>
+    <h1>Silver</h1>
+    <p class="muted">Hand-made silver jewelry. One of one, no repeats.</p>
   </div>
 
   {
     products.length === 0 ? (
-      <div class="empty muted">No pieces for sale right now. Check back soon.</div>
+      <div class="empty muted">No silver pieces for sale right now. Check back soon.</div>
     ) : (
       <div class="grid">
         {products.map((p) => (
