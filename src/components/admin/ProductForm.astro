@@ -90,10 +90,16 @@ const costDollars =
         </div>
 
         <div class="full">
-          <label class="checkbox">
-            <input type="checkbox" id="featured" name="featured" checked={product?.featured ?? false} />
-            <span>Feature on homepage</span>
-          </label>
+          <div class="checkbox-row">
+            <label class="checkbox">
+              <input type="checkbox" id="featured" name="featured" checked={product?.featured ?? false} />
+              <span>Feature on homepage</span>
+            </label>
+            <label class="checkbox">
+              <input type="checkbox" id="silver_jewelry" name="silver_jewelry" checked={product?.silver_jewelry ?? false} />
+              <span>Silver jewelry</span>
+            </label>
+          </div>
         </div>
 
         <div>
@@ -224,6 +230,7 @@ const costDollars =
       cost_cents: costCents,
       status: String(fd.get('status') ?? 'draft'),
       featured: fd.get('featured') === 'on',
+      silver_jewelry: fd.get('silver_jewelry') === 'on',
       length: String(fd.get('length') ?? ''),
       meta_description: String(fd.get('meta_description') ?? ''),
     };
@@ -360,6 +367,12 @@ const costDollars =
     resize: vertical;
   }
 
+  .checkbox-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.25rem;
+    row-gap: 0.6rem;
+  }
   .checkbox {
     display: inline-flex;
     align-items: center;

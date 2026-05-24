@@ -12,6 +12,7 @@ export interface ProductInput {
   cost_cents: number | null;
   status: ProductStatus;
   featured: boolean;
+  silver_jewelry: boolean;
   length: string | null;
   meta_description: string | null;
 }
@@ -61,6 +62,7 @@ export async function validateProductInput(
       cost_cents: costCents,
       status: statusRaw as ProductStatus,
       featured: toBool(raw.featured),
+      silver_jewelry: toBool(raw.silver_jewelry),
       length: nullable(raw.length),
       meta_description: nullable(raw.meta_description),
     },

@@ -19,6 +19,7 @@ export interface Product {
   cost_cents: number | null;
   status: ProductStatus;
   featured: boolean;
+  silver_jewelry: boolean;
   length: string | null;
   meta_description: string | null;
   sold_at: string | null;

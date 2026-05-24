@@ -8,7 +8,7 @@ export const prerender = false;
 
 // Explicit column list — cost_cents must never leak out of the public API.
 const PUBLIC_COLUMNS =
-  'id, slug, piece_id, title, price_cents, length, status, featured, published_at, created_at, product_images(storage_path, alt_text, display_order)';
+  'id, slug, piece_id, title, price_cents, length, status, featured, silver_jewelry, published_at, created_at, product_images(storage_path, alt_text, display_order)';
 
 export const OPTIONS: APIRoute = ({ request }) => handleOptions(request);
 
@@ -39,6 +39,7 @@ export const GET: APIRoute = async ({ cookies, request }) => {
       length: p.length,
       status: p.status,
       featured: p.featured,
+      silver_jewelry: p.silver_jewelry,
       published_at: p.published_at,
       primary_image: primary,
     };
