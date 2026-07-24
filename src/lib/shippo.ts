@@ -61,6 +61,15 @@ export async function loadShippingSettings(
     .eq('id', 1)
     .maybeSingle();
   if (error || !data) return null;
+  // Shippo/USPS reject a blank from-address email, so fall back to the
+  // transactional EMAIL_FROM if the shipping settings row has none.
+  const emailFallback =
+    (typeof process !== 'undefined' && process.env?.EMAIL_FROM) ||
+    import.meta.env.EMAIL_FROM ||
+    null;
+  const shipFromEmail =
+    (typeof data.ship_from_email === 'string' && data.ship_from_email.trim()) ||
+    emailFallback;
   return {
     name: data.ship_from_name,
     street1: data.ship_from_street1,
@@ -70,7 +79,7 @@ export async function loadShippingSettings(
     zip: data.ship_from_zip,
     country: data.ship_from_country,
     phone: data.ship_from_phone,
-    email: data.ship_from_email,
+    email: shipFromEmail,
     length_in: Number(data.default_length_in),
     width_in: Number(data.default_width_in),
     height_in: Number(data.default_height_in),
