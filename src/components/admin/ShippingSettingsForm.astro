@@ -64,8 +64,7 @@ const { settings } = Astro.props;
           name="ship_from_zip"
           required
           inputmode="numeric"
-          pattern="\s*\d{5}(-\d{4})?\s*"
-          title="5-digit ZIP, optionally ZIP+4 (e.g. 81425 or 81425-1234)"
+          autocomplete="off"
           value={settings.ship_from_zip}
         />
       </div>
@@ -168,7 +167,9 @@ const { settings } = Astro.props;
       ship_from_street2: String(fd.get('ship_from_street2') ?? '').trim(),
       ship_from_city: String(fd.get('ship_from_city') ?? '').trim(),
       ship_from_state: String(fd.get('ship_from_state') ?? '').trim(),
-      ship_from_zip: String(fd.get('ship_from_zip') ?? '').trim(),
+      // Strip anything that isn't a digit or dash so hidden autofill/whitespace
+      // characters can't sneak into the ZIP and fail server validation.
+      ship_from_zip: String(fd.get('ship_from_zip') ?? '').replace(/[^\d-]/g, ''),
       ship_from_phone: String(fd.get('ship_from_phone') ?? '').trim(),
       ship_from_email: String(fd.get('ship_from_email') ?? '').trim(),
       default_length_in: parseFloat(String(fd.get('default_length_in') ?? '')),
