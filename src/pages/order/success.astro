@@ -166,7 +166,7 @@ export const prerender = false;
       .join('');
 
     subtotalEl.textContent = formatPrice(o.subtotal_cents);
-    shippingEl.textContent = formatPrice(o.shipping_cents);
+    shippingEl.textContent = o.shipping_cents === 0 ? 'Free' : formatPrice(o.shipping_cents);
     if (o.tax_cents > 0) {
       taxEl.textContent = formatPrice(o.tax_cents);
       taxRow.hidden = false;

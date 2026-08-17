@@ -137,7 +137,7 @@ function buildHtml(o: OrderConfirmationArgs, firstName: string): string {
                 </tr>
                 <tr>
                   <td style="padding:3px 0;color:#6b6b6b;">Shipping</td>
-                  <td style="padding:3px 0;text-align:right;font-variant-numeric:tabular-nums;">${formatPrice(o.shipping_cents)}</td>
+                  <td style="padding:3px 0;text-align:right;font-variant-numeric:tabular-nums;">${o.shipping_cents === 0 ? 'Free' : formatPrice(o.shipping_cents)}</td>
                 </tr>
                 ${
                   o.tax_cents > 0
@@ -202,7 +202,7 @@ ORDER ${o.order_number}
 ${itemLines}
 
 Subtotal   ${formatPrice(o.subtotal_cents)}
-Shipping   ${formatPrice(o.shipping_cents)}${o.tax_cents > 0 ? `\nTax        ${formatPrice(o.tax_cents)}` : ''}
+Shipping   ${o.shipping_cents === 0 ? 'Free' : formatPrice(o.shipping_cents)}${o.tax_cents > 0 ? `\nTax        ${formatPrice(o.tax_cents)}` : ''}
 Total      ${formatPrice(o.total_cents)}
 
 SHIPPING TO

@@ -4,7 +4,6 @@
 import type { APIRoute } from 'astro';
 import { createSupabaseAdminClient } from '~/lib/supabase/admin';
 import { validateCart, fetchPrimaryImagePaths } from '~/lib/cart-validate';
-import { getUspsGroundAdvantageRate, loadShippingSettings } from '~/lib/shippo';
 import { publicImageUrl } from '~/lib/images';
 import { getStripe } from '~/lib/stripe';
 import { US_STATES } from '~/lib/orders';
@@ -58,9 +57,6 @@ export const POST: APIRoute = async ({ request, url }) => {
   if (!US_STATE_SET.has(state)) return wrap(fail('Valid state is required', 400));
   if (!ZIP_RE.test(postal)) return wrap(fail('Valid ZIP code is required', 400));
 
-  const clientSentRateId =
-    typeof body.shipping_rate_id === 'string' ? body.shipping_rate_id : null;
-
   const supabase = createSupabaseAdminClient();
 
   // (1) Re-validate cart server-side. Never trust the client.
@@ -83,59 +79,13 @@ export const POST: APIRoute = async ({ request, url }) => {
   }
   if (validation.available.length === 0) return wrap(fail('Cart is empty', 400));
 
-  // (2) Re-fetch shipping rate (Shippo rates expire ~10 min; the client-sent
-  //     id is only a debugging breadcrumb).
-  const settings = await loadShippingSettings(supabase);
-  if (!settings) {
-    return wrap(
-      new Response(
-        JSON.stringify({
-          ok: false,
-          error: { code: 'shipping_not_configured', message: 'Shipping origin is not configured.' },
-        }),
-        { status: 500, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-  }
-
-  const freshRate = await getUspsGroundAdvantageRate({
-    settings,
-    to: {
-      name,
-      street1: line1,
-      street2: line2 ?? undefined,
-      city,
-      state,
-      zip: postal,
-      country,
-    },
-    itemCount: validation.available.length,
-  });
-
-  if (!freshRate) {
-    return wrap(
-      new Response(
-        JSON.stringify({
-          ok: false,
-          error: {
-            code: 'shipping_unavailable',
-            message: "Couldn't confirm shipping. Please try again.",
-          },
-        }),
-        { status: 400, headers: { 'content-type': 'application/json' } },
-      ),
-    );
-  }
-
-  if (clientSentRateId && clientSentRateId !== freshRate.rate_id) {
-    console.info(
-      `checkout: shipping rate re-fetched (client=${clientSentRateId}, fresh=${freshRate.rate_id})`,
-    );
-  }
-
-  // (3) Calculate totals from DB + fresh rate.
+  // (2) Calculate totals. Shipping is free — the owner absorbs the cost, and
+  //     dropping the live rate fetch removes checkout friction (no address
+  //     gating / "Calculating…" wait). We still collect + store the shipping
+  //     address above so the piece can be mailed; label rates are looked up
+  //     fresh in the admin when a label is actually purchased.
   const subtotalCents = validation.available.reduce((sum, p) => sum + p.price_cents, 0);
-  const shippingCents = freshRate.amount_cents;
+  const shippingCents = 0;
   const taxCents = 0; // Stripe Tax adds tax to amount_total at session time.
   const totalCents = subtotalCents + shippingCents;
 
@@ -158,9 +108,9 @@ export const POST: APIRoute = async ({ request, url }) => {
       shipping_cents: shippingCents,
       tax_cents: taxCents,
       total_cents: totalCents,
-      shippo_rate_id: freshRate.rate_id,
-      shipping_service_level: freshRate.service_level,
-      shipping_estimated_days: freshRate.estimated_days,
+      shippo_rate_id: null,
+      shipping_service_level: 'Free shipping',
+      shipping_estimated_days: null,
       customer_notes: customerNotes,
     })
     .select('id, order_number')
@@ -221,23 +171,7 @@ export const POST: APIRoute = async ({ request, url }) => {
       mode: 'payment',
       payment_method_types: ['card'],
       line_items: lineItems,
-      shipping_options: [
-        {
-          shipping_rate_data: {
-            type: 'fixed_amount',
-            fixed_amount: { amount: shippingCents, currency: 'usd' },
-            display_name: freshRate.service_level,
-            delivery_estimate: {
-              minimum: {
-                unit: 'business_day',
-                value: Math.max(2, freshRate.estimated_days - 1),
-              },
-              maximum: { unit: 'business_day', value: freshRate.estimated_days + 1 },
-            },
-            tax_behavior: 'exclusive',
-          },
-        },
-      ],
+      // No shipping_options — shipping is free, so Stripe charges subtotal + tax only.
       automatic_tax: { enabled: true },
       customer_email: email,
       shipping_address_collection: { allowed_countries: ['US'] },
